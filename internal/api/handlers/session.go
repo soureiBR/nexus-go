@@ -9,9 +9,8 @@ import (
 	
 	"github.com/gin-gonic/gin"
 	"github.com/skip2/go-qrcode"
-	"go.mau.fi/whatsmeow/store/rawstore"
+	"go.mau.fi/whatsmeow/store"
 	
-	"yourproject/internal/models"
 	"yourproject/internal/services/whatsapp"
 	"yourproject/pkg/logger"
 )

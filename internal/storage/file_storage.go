@@ -7,9 +7,7 @@ import (
     "os"
     "path/filepath"
     "sync"
-    
-    "go.mau.fi/whatsmeow/store"
-    "go.mau.fi/whatsmeow/types"
+    "time"
 )
 
 // FileStore implementa o armazenamento de sessões em arquivos

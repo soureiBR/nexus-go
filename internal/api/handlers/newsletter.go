@@ -7,7 +7,6 @@ import (
 	
 	"github.com/gin-gonic/gin"
 	
-	"yourproject/internal/services/newsletter"
 	"yourproject/internal/services/whatsapp"
 	"yourproject/pkg/logger"
 )

@@ -34,8 +34,8 @@ type Client struct {
     LastActive  time.Time
 }
 
-// EventHandler processa eventos do WhatsApp
-type EventHandler func(userID string, evt interface{}) error
+// Remova a definição de EventHandler, já que está definida em event.go
+// type EventHandler func(userID string, evt interface{}) error
 
 // NewSessionManager cria um novo gerenciador de sessões
 func NewSessionManager(fileStore *storage.FileStore) *SessionManager {
@@ -131,6 +131,20 @@ func (sm *SessionManager) DeleteSession(userID string) error {
     return sm.fileStore.DeleteSession(userID)
 }
 
+// DisconnectAll desconecta todas as sessões
+func (sm *SessionManager) DisconnectAll() {
+    sm.clientsMutex.RLock()
+    defer sm.clientsMutex.RUnlock()
+    
+    for _, client := range sm.clients {
+        client.WAClient.Disconnect()
+    }
+}
+
+// Remova os métodos RegisterEventHandler e processEvent, já que estão definidos em event.go
+// Eles seriam estas funções:
+
+/*
 // RegisterEventHandler registra um handler para eventos
 func (sm *SessionManager) RegisterEventHandler(eventType string, handler EventHandler) {
     sm.clientsMutex.Lock()
@@ -175,3 +189,4 @@ func (sm *SessionManager) processEvent(userID string, evt interface{}) {
         }
     }
 }
+*/

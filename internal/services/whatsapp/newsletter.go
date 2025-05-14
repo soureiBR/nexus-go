@@ -1,5 +1,5 @@
-// internal/services/newsletter/newsletter.go
-package newsletter
+// internal/services/whatsapp/newsletter.go
+package whatsapp
 
 import (
 	"context"
@@ -12,7 +12,6 @@ import (
 	
 	"github.com/google/uuid"
 	
-	"yourproject/internal/services/whatsapp"
 	"yourproject/internal/storage"
 	"yourproject/pkg/logger"
 )
@@ -24,7 +23,7 @@ type Newsletter struct {
 	Content      string                 `json:"content"`
 	MediaURL     string                 `json:"media_url,omitempty"`
 	MediaType    string                 `json:"media_type,omitempty"`
-	Buttons      []whatsapp.ButtonData  `json:"buttons,omitempty"`
+	Buttons      []ButtonData  `json:"buttons,omitempty"`
 	Recipients   []string               `json:"recipients"`
 	Status       string                 `json:"status"` // draft, scheduled, sending, completed, failed
 	ScheduledFor *time.Time             `json:"scheduled_for,omitempty"`
@@ -49,7 +48,7 @@ type DeliveryReport struct {
 
 // NewsletterService gerencia o envio de newsletters
 type NewsletterService struct {
-	sessionManager *whatsapp.SessionManager
+	sessionManager *SessionManager
 	fileStore      *storage.FileStore
 	newsletterDir  string
 	newsletters    map[string]*Newsletter
@@ -59,7 +58,7 @@ type NewsletterService struct {
 }
 
 // NewNewsletterService cria um novo serviço de newsletter
-func NewNewsletterService(sm *whatsapp.SessionManager, fs *storage.FileStore, baseDir string) (*NewsletterService, error) {
+func NewNewsletterService(sm *SessionManager, fs *storage.FileStore, baseDir string) (*NewsletterService, error) {
 	// Configurar diretório para newsletters
 	newsletterDir := filepath.Join(baseDir, "newsletters")
 	if err := os.MkdirAll(newsletterDir, 0755); err != nil {
@@ -204,7 +203,7 @@ func (s *NewsletterService) saveDeliveryReports(newsletterID string) error {
 
 // CreateNewsletter cria um novo newsletter
 func (s *NewsletterService) CreateNewsletter(title, content, mediaURL, mediaType string, 
-	buttons []whatsapp.ButtonData, recipients []string, createdBy, sessionID string) (*Newsletter, error) {
+	buttons []ButtonData, recipients []string, createdBy, sessionID string) (*Newsletter, error) {
 	
 	s.mutex.Lock()
 	defer s.mutex.Unlock()

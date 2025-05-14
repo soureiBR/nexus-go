@@ -17,7 +17,6 @@ import (
 	"yourproject/internal/api/middlewares"
 	"yourproject/internal/api/routes"
 	"yourproject/internal/config"
-	"yourproject/internal/services/newsletter"
 	"yourproject/internal/services/webhook"
 	"yourproject/internal/services/whatsapp"
 	"yourproject/internal/storage"
@@ -49,8 +48,8 @@ func main() {
 	// Configurar webhook
 	webhookService := webhook.NewDispatcher(cfg.WebhookURL)
 	
-	// Inicializar serviço de newsletter
-	newsletterService, err := newsletter.NewNewsletterService(sessionManager, fileStore, sessionDir)
+	// Inicializar serviço de newsletter (usando o método do whatsapp)
+	newsletterService, err := whatsapp.NewNewsletterService(sessionManager, fileStore, sessionDir)
 	if err != nil {
 		log.Fatalf("Falha ao inicializar serviço de newsletter: %v", err)
 	}
