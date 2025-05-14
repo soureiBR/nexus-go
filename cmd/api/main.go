@@ -17,8 +17,9 @@ import (
 	"yourproject/internal/api/middlewares"
 	"yourproject/internal/api/routes"
 	"yourproject/internal/config"
-	"yourproject/internal/services/whatsapp"
+	"yourproject/internal/services/newsletter"
 	"yourproject/internal/services/webhook"
+	"yourproject/internal/services/whatsapp"
 	"yourproject/internal/storage"
 	"yourproject/pkg/logger"
 )
@@ -29,11 +30,6 @@ func main() {
 	
 	// Configurar logger
 	logger.Setup(cfg.LogLevel)
-	
-	// Configurar modo do Gin
-	if cfg.Environment == "production" {
-		gin.SetMode(gin.ReleaseMode)
-	}
 	
 	// Configurar diretório de sessões
 	sessionDir := filepath.Join(".", "sessions")
@@ -50,31 +46,25 @@ func main() {
 	// Inicializar gerenciador de sessões
 	sessionManager := whatsapp.NewSessionManager(fileStore)
 	
-	// Iniciar limpeza periódica de sessões
-	sessionManager.StartPeriodicCleanup(cfg.CleanupInterval, cfg.MaxInactiveTime)
-	
 	// Configurar webhook
 	webhookService := webhook.NewDispatcher(cfg.WebhookURL)
-	if cfg.WebhookURL != "" {
-		err := webhookService.Configure(cfg.WebhookURL, []string{"message", "connected", "disconnected", "qr", "logged_out"}, cfg.WebhookSecret)
-		if err != nil {
-			logger.Warn("Falha ao configurar webhook inicial", "error", err)
-		}
+	
+	// Inicializar serviço de newsletter
+	newsletterService, err := newsletter.NewNewsletterService(sessionManager, fileStore, sessionDir)
+	if err != nil {
+		log.Fatalf("Falha ao inicializar serviço de newsletter: %v", err)
 	}
 	
 	// Registrar handlers de eventos
 	sessionManager.RegisterEventHandler("message", func(userID string, evt interface{}) error {
 		return webhookService.DispatchEvent(userID, "message", evt)
 	})
-	
 	sessionManager.RegisterEventHandler("connected", func(userID string, evt interface{}) error {
 		return webhookService.DispatchEvent(userID, "connected", evt)
 	})
-	
 	sessionManager.RegisterEventHandler("disconnected", func(userID string, evt interface{}) error {
 		return webhookService.DispatchEvent(userID, "disconnected", evt)
 	})
-	
 	sessionManager.RegisterEventHandler("logged_out", func(userID string, evt interface{}) error {
 		return webhookService.DispatchEvent(userID, "logged_out", evt)
 	})
@@ -83,47 +73,37 @@ func main() {
 	sessionHandler := handlers.NewSessionHandler(sessionManager)
 	messageHandler := handlers.NewMessageHandler(sessionManager)
 	webhookHandler := handlers.NewWebhookHandler(webhookService)
+	groupHandler := handlers.NewGroupHandler(sessionManager)
+	newsletterHandler := handlers.NewNewsletterHandler(newsletterService)
+	communityHandler := handlers.NewCommunityHandler(sessionManager)
 	
 	// Configurar middleware de autenticação
 	authMiddleware := middlewares.NewAuthMiddleware(cfg.APIKey)
 	
 	// Configurar servidor HTTP
-	r := gin.New()
-	
-	// Adicionar middlewares globais
-	r.Use(middlewares.Logger())
-	r.Use(middlewares.RecoveryWithLogger())
-	
-	// Configurar limites de upload
-	r.MaxMultipartMemory = cfg.MaxUploadSize
-	
-	// Configurar rotas
-	routes.SetupRoutes(r, sessionHandler, messageHandler, webhookHandler, authMiddleware)
-	
-	// Adicionar rota de healthcheck
-	r.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"status":    "ok",
-			"version":   "1.0.0",
-			"timestamp": time.Now().Unix(),
-		})
-	})
+	r := gin.Default()
+	routes.SetupRoutes(
+		r, 
+		sessionHandler, 
+		messageHandler, 
+		webhookHandler,
+		groupHandler,
+		newsletterHandler,
+		communityHandler,
+		authMiddleware,
+	)
 	
 	// Iniciar servidor com graceful shutdown
 	srv := &http.Server{
-		Addr:         cfg.Host + ":" + cfg.Port,
-		Handler:      r,
-		ReadTimeout:  cfg.RequestTimeout,
-		WriteTimeout: cfg.RequestTimeout * 2, // Tempo de escrita deve ser maior para permitir uploads
-		IdleTimeout:  120 * time.Second,
+		Addr:    ":" + cfg.Port,
+		Handler: r,
 	}
 	
 	// Iniciar servidor em goroutine
 	go func() {
-		logger.Info("Iniciando servidor HTTP", "host", cfg.Host, "port", cfg.Port)
+		log.Printf("Iniciando servidor na porta %s", cfg.Port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Error("Falha ao iniciar servidor HTTP", "error", err)
-			os.Exit(1)
+			log.Fatalf("Erro ao iniciar servidor: %v", err)
 		}
 	}()
 	
@@ -132,19 +112,17 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	
-	logger.Info("Desligando servidor...")
-	
-	// Criar contexto com timeout para encerramento
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	log.Println("Desligando servidor...")
 	
 	// Desconectar todas as sessões antes de encerrar
 	sessionManager.DisconnectAll()
 	
-	// Encerrar servidor HTTP
+	// Encerrar servidor com timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
-		logger.Error("Erro ao desligar servidor HTTP", "error", err)
+		log.Fatalf("Erro ao desligar servidor: %v", err)
 	}
 	
-	logger.Info("Servidor encerrado com sucesso")
+	log.Println("Servidor encerrado com sucesso")
 }
