@@ -2,25 +2,24 @@
 package whatsapp
 
 import (
-	"context"
-	"fmt"
-	"time"
-	
-	"go.mau.fi/whatsmeow"
-	"go.mau.fi/whatsmeow/types"
-	
-	"yourproject/pkg/logger"
+    "fmt"
+    "time"
+    
+    "go.mau.fi/whatsmeow"
+    "go.mau.fi/whatsmeow/types"
+    
+    "yourproject/pkg/logger"
 )
 
 // CommunityInfo representa informações de uma comunidade
 type CommunityInfo struct {
-	JID           string       `json:"jid"`
-	Name          string       `json:"name"`
-	Description   string       `json:"description,omitempty"`
-	Created       time.Time    `json:"created"`
-	Creator       string       `json:"creator"`
-	LinkedGroups  []GroupInfo  `json:"linked_groups"`
-	AnnouncementGroups []GroupInfo `json:"announcement_groups"`
+    JID           string       `json:"jid"`
+    Name          string       `json:"name"`
+    Description   string       `json:"description,omitempty"`
+    Created       time.Time    `json:"created"`
+    Creator       string       `json:"creator"`
+    LinkedGroups  []GroupInfo  `json:"linked_groups"`
+    AnnouncementGroups []GroupInfo `json:"announcement_groups"`
 }
 
 // CreateCommunity cria uma nova comunidade no WhatsApp
@@ -30,15 +29,10 @@ func (sm *SessionManager) CreateCommunity(userID, name string, participants []st
         return nil, fmt.Errorf("sessão não encontrada: %s", userID)
     }
     
-    // Verificar se o cliente está conectado
-    if !client.Connected {
-        return nil, fmt.Errorf("cliente não está conectado")
-    }
-    
     // Converter strings de participantes para JIDs
     var jids []types.JID
     for _, participant := range participants {
-        jid, err := ParseJID(participant)
+        jid, err := types.ParseJID(participant)
         if err != nil {
             return nil, fmt.Errorf("JID inválido para participante %s: %w", participant, err)
         }
@@ -56,12 +50,8 @@ func (sm *SessionManager) CreateCommunity(userID, name string, participants []st
         },
     }
     
-    // Usar o método CreateGroup existente para criar a comunidade
-    // Note que pode ser necessário passar um contexto como primeiro argumento
+    // Usar o método CreateGroup para criar a comunidade
     groupInfo, err := client.WAClient.CreateGroup(req)
-    // Se o método esperar um contexto:
-    // groupInfo, err := client.WAClient.CreateGroup(ctx, req)
-    
     if err != nil {
         return nil, fmt.Errorf("falha ao criar comunidade: %w", err)
     }
@@ -145,6 +135,7 @@ func (sm *SessionManager) GetCommunityInfo(userID, communityJID string) (*Commun
         Name:               info.Name,
         Description:        info.Topic,
         Creator:            info.OwnerJID.String(),
+        Created:            info.GroupCreated,
         LinkedGroups:       linkedGroups,
         AnnouncementGroups: announcementGroups,
     }, nil
@@ -188,38 +179,39 @@ func (sm *SessionManager) UpdateCommunityName(userID, communityJID, newName stri
 
 // UpdateCommunityDescription atualiza a descrição de uma comunidade
 func (sm *SessionManager) UpdateCommunityDescription(userID, communityJID, newDescription string) error {
-	client, exists := sm.GetSession(userID)
-	if !exists {
-		return fmt.Errorf("sessão não encontrada: %s", userID)
-	}
-	
-	// Converter para JID
-	jid, err := types.ParseJID(communityJID)
-	if err != nil {
-		return fmt.Errorf("JID de comunidade inválido: %w", err)
-	}
-	
-	// Verificar se é realmente uma comunidade
-	if jid.Server != types.GroupServer {
-		return fmt.Errorf("JID não é uma comunidade: %s", communityJID)
-	}
-	
-	// Atualizar descrição da comunidade
-	err = client.WAClient.SetGroupDescription(jid, newDescription)
-	if err != nil {
-		return fmt.Errorf("falha ao atualizar descrição da comunidade: %w", err)
-	}
-	
-	// Atualizar última atividade
-	client.LastActive = time.Now()
-	
-	// Log
-	logger.Debug("Descrição da comunidade atualizada", 
-	"user_id", userID, 
-	"community_jid", communityJID, 
-	"new_description", newDescription)
-	
-	return nil
+    client, exists := sm.GetSession(userID)
+    if !exists {
+        return fmt.Errorf("sessão não encontrada: %s", userID)
+    }
+    
+    // Converter para JID
+    jid, err := types.ParseJID(communityJID)
+    if err != nil {
+        return fmt.Errorf("JID de comunidade inválido: %w", err)
+    }
+    
+    // Verificar se é realmente uma comunidade
+    if jid.Server != types.GroupServer {
+        return fmt.Errorf("JID não é uma comunidade: %s", communityJID)
+    }
+    
+    // Atualizar descrição da comunidade usando SetGroupTopic
+    // O método SetGroupDescription não recebe o contexto
+    err = client.WAClient.SetGroupTopic(jid, "", "", newDescription)
+    if err != nil {
+        return fmt.Errorf("falha ao atualizar descrição da comunidade: %w", err)
+    }
+    
+    // Atualizar última atividade
+    client.LastActive = time.Now()
+    
+    // Log
+    logger.Debug("Descrição da comunidade atualizada", 
+    "user_id", userID, 
+    "community_jid", communityJID, 
+    "new_description", newDescription)
+    
+    return nil
 }
 
 // LeaveCommunity sai de uma comunidade
@@ -364,11 +356,13 @@ func (sm *SessionManager) CreateGroupForCommunity(userID, communityJID, groupNam
     req := whatsmeow.ReqCreateGroup{
         Name:            groupName,
         Participants:    jids,
-        LinkedParentJID: communityID, // Link o grupo à comunidade
+        GroupLinkedParent: types.GroupLinkedParent{
+            LinkedParentJID: communityID, // Link o grupo à comunidade
+        },
     }
     
     // Criar grupo na comunidade
-    groupInfo, err := client.WAClient.CreateGroup(req)
+    waGroupInfo, err := client.WAClient.CreateGroup(req)
     if err != nil {
         return nil, fmt.Errorf("falha ao criar grupo na comunidade: %w", err)
     }
@@ -381,256 +375,216 @@ func (sm *SessionManager) CreateGroupForCommunity(userID, communityJID, groupNam
         "user_id", userID, 
         "community_jid", communityJID, 
         "group_name", groupName, 
-        "group_jid", groupInfo.JID.String())
+        "group_jid", waGroupInfo.JID.String())
     
     // Converter groupInfo do whatsmeow para nosso tipo GroupInfo
-    return convertWhatsmeowGroupInfoToGroupInfo(groupInfo), nil
+    participants := make([]GroupParticipant, len(waGroupInfo.Participants))
+    for i, p := range waGroupInfo.Participants {
+        participants[i] = GroupParticipant{
+            JID:       p.JID.String(),
+            IsAdmin:   p.IsAdmin,
+            IsSuperAdmin: p.IsSuperAdmin,
+        }
+    }
+    
+    // Criar e retornar nosso tipo GroupInfo
+    groupInfo := &GroupInfo{
+        JID:         waGroupInfo.JID.String(),
+        Name:        waGroupInfo.Name,
+        Topic:       waGroupInfo.Topic,
+        Created:     time.Unix(int64(waGroupInfo.Creation), 0),
+        Creator:     waGroupInfo.OwnerJID.String(),
+        Participants: participants,
+    }
+    
+    return groupInfo, nil
 }
 
 // LinkGroupToCommunity vincula um grupo existente a uma comunidade
 func (sm *SessionManager) LinkGroupToCommunity(userID, communityJID, groupJID string) error {
-	client, exists := sm.GetSession(userID)
-	if !exists {
-		return fmt.Errorf("sessão não encontrada: %s", userID)
-	}
-	
-	// Converter para JID de comunidade
-	communityID, err := types.ParseJID(communityJID)
-	if err != nil {
-		return fmt.Errorf("JID de comunidade inválido: %w", err)
-	}
-	
-	// Verificar se é realmente uma comunidade
-	if !communityID.IsGroup() {
-		return fmt.Errorf("JID não é uma comunidade: %s", communityJID)
-	}
-	
-	// Converter para JID de grupo
-	groupID, err := types.ParseJID(groupJID)
-	if err != nil {
-		return fmt.Errorf("JID de grupo inválido: %w", err)
-	}
-	
-	// Verificar se é realmente um grupo
-	if !groupID.IsGroup() {
-		return fmt.Errorf("JID não é um grupo: %s", groupJID)
-	}
-	
-	// Criar contexto com timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	
-	// Vincular grupo à comunidade
-	err = client.WAClient.LinkGroupToCommuntiy(ctx, communityID, groupID)
-	if err != nil {
-		return fmt.Errorf("falha ao vincular grupo à comunidade: %w", err)
-	}
-	
-	// Atualizar última atividade
-	client.LastActive = time.Now()
-	
-	// Log
-	logger.Debug("Grupo vinculado à comunidade", 
-		"user_id", userID, 
-		"community_jid", communityJID, 
-		"group_jid", groupJID)
-	
-	return nil
+    client, exists := sm.GetSession(userID)
+    if !exists {
+        return fmt.Errorf("sessão não encontrada: %s", userID)
+    }
+    
+    // Converter para JID de comunidade
+    communityID, err := types.ParseJID(communityJID)
+    if err != nil {
+        return fmt.Errorf("JID de comunidade inválido: %w", err)
+    }
+    
+    // Verificar se é realmente uma comunidade
+    if communityID.Server != types.GroupServer {
+        return fmt.Errorf("JID não é uma comunidade: %s", communityJID)
+    }
+    
+    // Converter para JID de grupo
+    groupID, err := types.ParseJID(groupJID)
+    if err != nil {
+        return fmt.Errorf("JID de grupo inválido: %w", err)
+    }
+    
+    // Verificar se é realmente um grupo
+    if groupID.Server != types.GroupServer {
+        return fmt.Errorf("JID não é um grupo: %s", groupJID)
+    }
+    
+    // Link group to community
+    err = client.WAClient.LinkGroup(communityID, groupID)
+    if err != nil {
+        return fmt.Errorf("falha ao vincular grupo à comunidade: %w", err)
+    }
+    
+    // Atualizar última atividade
+    client.LastActive = time.Now()
+    
+    // Log
+    logger.Debug("Grupo vinculado à comunidade", 
+        "user_id", userID, 
+        "community_jid", communityJID, 
+        "group_jid", groupJID)
+    
+    return nil
 }
 
 // UnlinkGroupFromCommunity desvincula um grupo de uma comunidade
 func (sm *SessionManager) UnlinkGroupFromCommunity(userID, communityJID, groupJID string) error {
-	client, exists := sm.GetSession(userID)
-	if !exists {
-		return fmt.Errorf("sessão não encontrada: %s", userID)
-	}
-	
-	// Converter para JID de comunidade
-	communityID, err := types.ParseJID(communityJID)
-	if err != nil {
-		return fmt.Errorf("JID de comunidade inválido: %w", err)
-	}
-	
-	// Verificar se é realmente uma comunidade
-	if !communityID.IsGroup() {
-		return fmt.Errorf("JID não é uma comunidade: %s", communityJID)
-	}
-	
-	// Converter para JID de grupo
-	groupID, err := types.ParseJID(groupJID)
-	if err != nil {
-		return fmt.Errorf("JID de grupo inválido: %w", err)
-	}
-	
-	// Verificar se é realmente um grupo
-	if !groupID.IsGroup() {
-		return fmt.Errorf("JID não é um grupo: %s", groupJID)
-	}
-	
-	// Criar contexto com timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	
-	// Desvincular grupo da comunidade
-	err = client.WAClient.UnlinkGroupFromCommunity(ctx, communityID, groupID)
-	if err != nil {
-		return fmt.Errorf("falha ao desvincular grupo da comunidade: %w", err)
-	}
-	
-	// Atualizar última atividade
-	client.LastActive = time.Now()
-	
-	// Log
-	logger.Debug("Grupo desvinculado da comunidade", 
-		"user_id", userID, 
-		"community_jid", communityJID, 
-		"group_jid", groupJID)
-	
-	return nil
-}
-
-// SendCommunityAnnouncement envia um anúncio para todos os grupos vinculados a uma comunidade
-func (sm *SessionManager) SendCommunityAnnouncement(userID, communityJID, message string) error {
-	client, exists := sm.GetSession(userID)
-	if !exists {
-		return fmt.Errorf("sessão não encontrada: %s", userID)
-	}
-	
-	// Converter para JID de comunidade
-	communityID, err := types.ParseJID(communityJID)
-	if err != nil {
-		return fmt.Errorf("JID de comunidade inválido: %w", err)
-	}
-	
-	// Verificar se é realmente uma comunidade
-	if !communityID.IsGroup() {
-		return fmt.Errorf("JID não é uma comunidade: %s", communityJID)
-	}
-	
-	// Criar contexto com timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	
-	// Enviar anúncio para a comunidade
-	err = client.WAClient.SendCommunityAnnouncement(ctx, communityID, message)
-	if err != nil {
-		return fmt.Errorf("falha ao enviar anúncio para a comunidade: %w", err)
-	}
-	
-	// Atualizar última atividade
-	client.LastActive = time.Now()
-	
-	// Log
-	logger.Debug("Anúncio enviado para a comunidade", 
-		"user_id", userID, 
-		"community_jid", communityJID)
-	
-	return nil
-}
-
-// JoinCommunityWithLink entra em uma comunidade usando um link de convite
-func (sm *SessionManager) JoinCommunityWithLink(userID, link string) (*CommunityInfo, error) {
-	client, exists := sm.GetSession(userID)
-	if !exists {
-		return nil, fmt.Errorf("sessão não encontrada: %s", userID)
-	}
-	
-	// Criar contexto com timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	
-	// Entrar na comunidade
-	communityJID, err := client.WAClient.JoinCommunityWithLink(ctx, link)
-	if err != nil {
-		return nil, fmt.Errorf("falha ao entrar na comunidade: %w", err)
-	}
-	
-	// Atualizar última atividade
-	client.LastActive = time.Now()
-	
-	// Log
-	logger.Debug("Entrou na comunidade via link", 
-		"user_id", userID, 
-		"community_jid", communityJID.String())
-	
-	// Obter informações da comunidade
-	return sm.GetCommunityInfo(userID, communityJID.String())
+    client, exists := sm.GetSession(userID)
+    if !exists {
+        return fmt.Errorf("sessão não encontrada: %s", userID)
+    }
+    
+    // Converter para JID de comunidade
+    communityID, err := types.ParseJID(communityJID)
+    if err != nil {
+        return fmt.Errorf("JID de comunidade inválido: %w", err)
+    }
+    
+    // Verificar se é realmente uma comunidade
+    if communityID.Server != types.GroupServer {
+        return fmt.Errorf("JID não é uma comunidade: %s", communityJID)
+    }
+    
+    // Converter para JID de grupo
+    groupID, err := types.ParseJID(groupJID)
+    if err != nil {
+        return fmt.Errorf("JID de grupo inválido: %w", err)
+    }
+    
+    // Verificar se é realmente um grupo
+    if groupID.Server != types.GroupServer {
+        return fmt.Errorf("JID não é um grupo: %s", groupJID)
+    }
+    
+    // Desvincular grupo da comunidade usando UnlinkGroup
+    err = client.WAClient.UnlinkGroup(communityID, groupID)
+    if err != nil {
+        return fmt.Errorf("falha ao desvincular grupo da comunidade: %w", err)
+    }
+    
+    // Atualizar última atividade
+    client.LastActive = time.Now()
+    
+    // Log
+    logger.Debug("Grupo desvinculado da comunidade", 
+        "user_id", userID, 
+        "community_jid", communityJID, 
+        "group_jid", groupJID)
+    
+    return nil
 }
 
 // GetCommunityInviteLink gera e retorna um link de convite para a comunidade
 func (sm *SessionManager) GetCommunityInviteLink(userID, communityJID string) (string, error) {
-	client, exists := sm.GetSession(userID)
-	if !exists {
-		return "", fmt.Errorf("sessão não encontrada: %s", userID)
-	}
-	
-	// Converter para JID
-	jid, err := types.ParseJID(communityJID)
-	if err != nil {
-		return "", fmt.Errorf("JID de comunidade inválido: %w", err)
-	}
-	
-	// Verificar se é realmente uma comunidade
-	if jid.Server != types.GroupServer {
-		return "", fmt.Errorf("JID não é uma comunidade: %s", communityJID)
-	}
-	
-	// Criar contexto com timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	
-	// Obter link de convite
-	link, err := client.WAClient.GetCommunityInviteLink(ctx, jid, false)
-	if err != nil {
-		return "", fmt.Errorf("falha ao obter link de convite: %w", err)
-	}
-	
-	// Atualizar última atividade
-	client.LastActive = time.Now()
-	
-	// Log
-	logger.Debug("Link de convite obtido", 
-		"user_id", userID, 
-		"community_jid", communityJID)
-	
-	return link, nil
+    client, exists := sm.GetSession(userID)
+    if !exists {
+        return "", fmt.Errorf("sessão não encontrada: %s", userID)
+    }
+    
+    // Converter para JID
+    jid, err := types.ParseJID(communityJID)
+    if err != nil {
+        return "", fmt.Errorf("JID de comunidade inválido: %w", err)
+    }
+    
+    // Verificar se é realmente uma comunidade
+    if jid.Server != types.GroupServer {
+        return "", fmt.Errorf("JID não é uma comunidade: %s", communityJID)
+    }
+    
+    // Obter link de convite usando GetGroupInviteLink
+    link, err := client.WAClient.GetGroupInviteLink(jid, false)
+    if err != nil {
+        return "", fmt.Errorf("falha ao obter link de convite: %w", err)
+    }
+    
+    // Atualizar última atividade
+    client.LastActive = time.Now()
+    
+    // Log
+    logger.Debug("Link de convite obtido", 
+        "user_id", userID, 
+        "community_jid", communityJID)
+    
+    return link, nil
 }
 
 // RevokeCommunityInviteLink revoga o link atual e gera um novo
 func (sm *SessionManager) RevokeCommunityInviteLink(userID, communityJID string) (string, error) {
-	client, exists := sm.GetSession(userID)
-	if !exists {
-		return "", fmt.Errorf("sessão não encontrada: %s", userID)
-	}
-	
-	// Converter para JID
-	jid, err := types.ParseJID(communityJID)
-	if err != nil {
-		return "", fmt.Errorf("JID de comunidade inválido: %w", err)
-	}
-	
-	// Verificar se é realmente uma comunidade
-	if jid.Server != types.GroupServer {
-		return "", fmt.Errorf("JID não é uma comunidade: %s", communityJID)
-	}
-	
-	// Criar contexto com timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	
-	// Revogar link atual e obter novo
-	link, err := client.WAClient.GetCommunityInviteLink(ctx, jid, true)
-	if err != nil {
-		return "", fmt.Errorf("falha ao revogar link de convite: %w", err)
-	}
-	
-	// Atualizar última atividade
-	client.LastActive = time.Now()
-	
-	// Log
-	logger.Debug("Link de convite da comunidade revogado e novo link obtido", 
-		"user_id", userID, 
-		"community_jid", communityJID)
-	
-	return link, nil
+    client, exists := sm.GetSession(userID)
+    if !exists {
+        return "", fmt.Errorf("sessão não encontrada: %s", userID)
+    }
+    
+    // Converter para JID
+    jid, err := types.ParseJID(communityJID)
+    if err != nil {
+        return "", fmt.Errorf("JID de comunidade inválido: %w", err)
+    }
+    
+    // Verificar se é realmente uma comunidade
+    if jid.Server != types.GroupServer {
+        return "", fmt.Errorf("JID não é uma comunidade: %s", communityJID)
+    }
+    
+    // Revogar link atual e obter novo usando GetGroupInviteLink com reset=true
+    link, err := client.WAClient.GetGroupInviteLink(jid, true)
+    if err != nil {
+        return "", fmt.Errorf("falha ao revogar link de convite: %w", err)
+    }
+    
+    // Atualizar última atividade
+    client.LastActive = time.Now()
+    
+    // Log
+    logger.Debug("Link de convite da comunidade revogado e novo link obtido", 
+        "user_id", userID, 
+        "community_jid", communityJID)
+    
+    return link, nil
+}
+
+// JoinCommunityWithLink entra em uma comunidade usando um link de convite
+func (sm *SessionManager) JoinCommunityWithLink(userID, link string) (*CommunityInfo, error) {
+    client, exists := sm.GetSession(userID)
+    if !exists {
+        return nil, fmt.Errorf("sessão não encontrada: %s", userID)
+    }
+    
+    // Entrar na comunidade usando JoinGroupWithLink
+    communityJID, err := client.WAClient.JoinGroupWithLink(link)
+    if err != nil {
+        return nil, fmt.Errorf("falha ao entrar na comunidade: %w", err)
+    }
+    
+    // Atualizar última atividade
+    client.LastActive = time.Now()
+    
+    // Log
+    logger.Debug("Entrou na comunidade via link", 
+        "user_id", userID, 
+        "community_jid", communityJID.String())
+    
+    // Obter informações da comunidade
+    return sm.GetCommunityInfo(userID, communityJID.String())
 }
