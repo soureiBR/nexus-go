@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
-	
+
 	"github.com/gin-gonic/gin"
-	
+
 	"yourproject/internal/api/handlers"
 	"yourproject/internal/api/middlewares"
 	"yourproject/internal/api/routes"
@@ -24,37 +24,41 @@ import (
 )
 
 func main() {
-	// Carregar configurações
+	// Load configuration
 	cfg := config.LoadConfig()
-	
-	// Configurar logger
+
+	// Configure logger
 	logger.Setup(cfg.LogLevel)
-	
-	// Configurar diretório de sessões
-	sessionDir := filepath.Join(".", "sessions")
-	if cfg.SessionDir != "" {
-		sessionDir = cfg.SessionDir
+
+	// Configure database path
+	dbPath := filepath.Join(".", "data", "whatsapp.db")
+	if cfg.DBPath != "" {
+		dbPath = cfg.DBPath
 	}
-	
-	// Inicializar armazenamento de arquivo
-	fileStore, err := storage.NewFileStore(sessionDir)
+
+	// Initialize SQL storage
+	sqlStore, err := storage.NewSQLStore(dbPath)
 	if err != nil {
-		log.Fatalf("Falha ao configurar armazenamento de sessões: %v", err)
+		log.Fatalf("Failed to configure SQL storage: %v", err)
 	}
-	
-	// Inicializar gerenciador de sessões
-	sessionManager := whatsapp.NewSessionManager(fileStore)
-	
-	// Configurar webhook
+	defer sqlStore.Close()
+
+	// Initialize session manager
+	sessionManager := whatsapp.NewSessionManager(sqlStore)
+
+	// Create a context for initialization
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Load existing sessions
+	if err := sessionManager.InitSessions(ctx); err != nil {
+		log.Printf("Warning: Failed to load all sessions: %v", err)
+	}
+
+	// Configure webhook
 	webhookService := webhook.NewDispatcher(cfg.WebhookURL)
-	
-	// Inicializar serviço de newsletter (usando o método do whatsapp)
-	newsletterService, err := whatsapp.NewNewsletterService(sessionManager, fileStore, sessionDir)
-	if err != nil {
-		log.Fatalf("Falha ao inicializar serviço de newsletter: %v", err)
-	}
-	
-	// Registrar handlers de eventos
+
+	// Register event handlers
 	sessionManager.RegisterEventHandler("message", func(userID string, evt interface{}) error {
 		return webhookService.DispatchEvent(userID, "message", evt)
 	})
@@ -67,61 +71,52 @@ func main() {
 	sessionManager.RegisterEventHandler("logged_out", func(userID string, evt interface{}) error {
 		return webhookService.DispatchEvent(userID, "logged_out", evt)
 	})
-	
-	// Configurar handlers HTTP
+	sessionManager.RegisterEventHandler("qr", func(userID string, evt interface{}) error {
+		return webhookService.DispatchEvent(userID, "qr", evt)
+	})
+
+	// Configure HTTP handlers
 	sessionHandler := handlers.NewSessionHandler(sessionManager)
 	messageHandler := handlers.NewMessageHandler(sessionManager)
 	webhookHandler := handlers.NewWebhookHandler(webhookService)
-	groupHandler := handlers.NewGroupHandler(sessionManager)
-	newsletterHandler := handlers.NewNewsletterHandler(newsletterService)
-	communityHandler := handlers.NewCommunityHandler(sessionManager)
-	
-	// Configurar middleware de autenticação
+
+	// Configure authentication middleware
 	authMiddleware := middlewares.NewAuthMiddleware(cfg.APIKey)
-	
-	// Configurar servidor HTTP
+
+	// Configure HTTP server
 	r := gin.Default()
-	routes.SetupRoutes(
-		r, 
-		sessionHandler, 
-		messageHandler, 
-		webhookHandler,
-		groupHandler,
-		newsletterHandler,
-		communityHandler,
-		authMiddleware,
-	)
-	
-	// Iniciar servidor com graceful shutdown
+	routes.SetupRoutes(r, sessionHandler, messageHandler, webhookHandler, authMiddleware)
+
+	// Start server with graceful shutdown
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
 		Handler: r,
 	}
-	
-	// Iniciar servidor em goroutine
+
+	// Start server in a goroutine
 	go func() {
-		log.Printf("Iniciando servidor na porta %s", cfg.Port)
+		log.Printf("Starting server on port %s", cfg.Port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Erro ao iniciar servidor: %v", err)
+			log.Fatalf("Server error: %v", err)
 		}
 	}()
-	
-	// Configurar graceful shutdown
+
+	// Configure graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
-	
-	log.Println("Desligando servidor...")
-	
-	// Desconectar todas as sessões antes de encerrar
+
+	log.Println("Shutting down server...")
+
+	// Disconnect all sessions before exiting
 	sessionManager.DisconnectAll()
-	
-	// Encerrar servidor com timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatalf("Erro ao desligar servidor: %v", err)
+
+	// Shutdown server with timeout
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Fatalf("Server shutdown error: %v", err)
 	}
-	
-	log.Println("Servidor encerrado com sucesso")
+
+	log.Println("Server gracefully stopped")
 }

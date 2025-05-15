@@ -7,18 +7,19 @@ import (
 	"os"
 	"strings"
 	"time"
-	
-	"go.mau.fi/whatsmeow"
-	"go.mau.fi/whatsmeow/binary/proto"
-	"go.mau.fi/whatsmeow/types"
-	
+
 	"yourproject/pkg/logger"
+
+	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/types"
+	"google.golang.org/protobuf/proto"
 )
 
 // ButtonData representa um botão para mensagens interativas
 type ButtonData struct {
-	ID      string `json:"id" binding:"required"`
-	Text    string `json:"text" binding:"required"`
+	ID   string `json:"id" binding:"required"`
+	Text string `json:"text" binding:"required"`
 }
 
 // SectionRow representa uma linha em uma seção de lista
@@ -40,12 +41,12 @@ func ParseJID(jid string) (types.JID, error) {
 		// Adicionar sufixo se não estiver presente
 		jid = jid + "@s.whatsapp.net"
 	}
-	
+
 	recipient, err := types.ParseJID(jid)
 	if err != nil {
 		return types.JID{}, fmt.Errorf("JID inválido: %w", err)
 	}
-	
+
 	return recipient, nil
 }
 
@@ -55,32 +56,32 @@ func (sm *SessionManager) SendText(userID, to, message string) (string, error) {
 	if !exists {
 		return "", fmt.Errorf("sessão não encontrada: %s", userID)
 	}
-	
+
 	// Converter para JID
 	recipient, err := ParseJID(to)
 	if err != nil {
 		return "", err
 	}
-	
+
 	// Criar contexto com timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	
+
 	// Enviar mensagem
-	msg, err := client.WAClient.SendMessage(ctx, recipient, &proto.Message{
+	msg, err := client.WAClient.SendMessage(ctx, recipient, &waE2E.Message{
 		Conversation: proto.String(message),
 	})
-	
+
 	if err != nil {
 		return "", fmt.Errorf("falha ao enviar mensagem: %w", err)
 	}
-	
+
 	// Atualizar última atividade
 	client.LastActive = time.Now()
-	
+
 	// Log
 	logger.Debug("Mensagem de texto enviada", "user_id", userID, "to", to, "message_id", msg.ID)
-	
+
 	return msg.ID, nil
 }
 
@@ -90,26 +91,25 @@ func (sm *SessionManager) SendMedia(userID, to, filePath, mediaType, caption str
 	if !exists {
 		return "", fmt.Errorf("sessão não encontrada: %s", userID)
 	}
-	
+
 	// Converter para JID
 	recipient, err := ParseJID(to)
 	if err != nil {
 		return "", err
 	}
-	
-	// Abrir arquivo
-	file, err := os.Open(filePath)
+
+	// Ler arquivo
+	fileData, err := os.ReadFile(filePath)
 	if err != nil {
-		return "", fmt.Errorf("falha ao abrir arquivo: %w", err)
+		return "", fmt.Errorf("falha ao ler arquivo: %w", err)
 	}
-	defer file.Close()
-	
+
 	// Obter informações do arquivo
-	fileInfo, err := file.Stat()
+	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		return "", fmt.Errorf("falha ao obter informações do arquivo: %w", err)
 	}
-	
+
 	// Determinar tipo de mídia se não especificado
 	if mediaType == "" {
 		// Tentar deduzir da extensão
@@ -124,106 +124,112 @@ func (sm *SessionManager) SendMedia(userID, to, filePath, mediaType, caption str
 			mediaType = "document"
 		}
 	}
-	
+
 	// Criar contexto com timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	
+
 	var msg whatsmeow.SendResponse
-	
-	// Enviar conforme o tipo de mídia
+
+	// Determinar tipo de upload baseado no tipo de mídia
+	var uploadType whatsmeow.MediaType
 	switch mediaType {
 	case "image", "img":
-		uploadedImg, err := client.WAClient.Upload(ctx, file, whatsmeow.MediaImage)
-		if err != nil {
-			return "", fmt.Errorf("falha ao fazer upload da imagem: %w", err)
-		}
-		
-		msg, err = client.WAClient.SendMessage(ctx, recipient, &proto.Message{
-			ImageMessage: &proto.ImageMessage{
-				Caption:       proto.String(caption),
-				Url:           proto.String(uploadedImg.URL),
-				DirectPath:    proto.String(uploadedImg.DirectPath),
-				MediaKey:      uploadedImg.MediaKey,
-				Mimetype:      proto.String("image/jpeg"),
-				FileEncSha256: uploadedImg.FileEncSHA256,
-				FileSha256:    uploadedImg.FileSHA256,
-				FileLength:    proto.Uint64(uint64(fileInfo.Size())),
-			},
-		})
-		
+		uploadType = whatsmeow.MediaImage
 	case "video", "vid":
-		uploadedVideo, err := client.WAClient.Upload(ctx, file, whatsmeow.MediaVideo)
-		if err != nil {
-			return "", fmt.Errorf("falha ao fazer upload do vídeo: %w", err)
-		}
-		
-		msg, err = client.WAClient.SendMessage(ctx, recipient, &proto.Message{
-			VideoMessage: &proto.VideoMessage{
-				Caption:       proto.String(caption),
-				Url:           proto.String(uploadedVideo.URL),
-				DirectPath:    proto.String(uploadedVideo.DirectPath),
-				MediaKey:      uploadedVideo.MediaKey,
-				Mimetype:      proto.String("video/mp4"),
-				FileEncSha256: uploadedVideo.FileEncSHA256,
-				FileSha256:    uploadedVideo.FileSHA256,
-				FileLength:    proto.Uint64(uint64(fileInfo.Size())),
-			},
-		})
-		
+		uploadType = whatsmeow.MediaVideo
 	case "audio", "voice":
-		uploadedAudio, err := client.WAClient.Upload(ctx, file, whatsmeow.MediaAudio)
-		if err != nil {
-			return "", fmt.Errorf("falha ao fazer upload do áudio: %w", err)
-		}
-		
-		msg, err = client.WAClient.SendMessage(ctx, recipient, &proto.Message{
-			AudioMessage: &proto.AudioMessage{
-				Url:           proto.String(uploadedAudio.URL),
-				DirectPath:    proto.String(uploadedAudio.DirectPath),
-				MediaKey:      uploadedAudio.MediaKey,
-				Mimetype:      proto.String("audio/mpeg"),
-				FileEncSha256: uploadedAudio.FileEncSHA256,
-				FileSha256:    uploadedAudio.FileSHA256,
-				FileLength:    proto.Uint64(uint64(fileInfo.Size())),
-				Ptt:           proto.Bool(mediaType == "voice"),
-			},
-		})
-		
+		uploadType = whatsmeow.MediaAudio
 	case "document", "doc", "file":
-		uploadedDoc, err := client.WAClient.Upload(ctx, file, whatsmeow.MediaDocument)
-		if err != nil {
-			return "", fmt.Errorf("falha ao fazer upload do documento: %w", err)
-		}
-		
-		msg, err = client.WAClient.SendMessage(ctx, recipient, &proto.Message{
-			DocumentMessage: &proto.DocumentMessage{
-				Caption:       proto.String(caption),
-				Url:           proto.String(uploadedDoc.URL),
-				DirectPath:    proto.String(uploadedDoc.DirectPath),
-				MediaKey:      uploadedDoc.MediaKey,
-				FileName:      proto.String(fileInfo.Name()),
-				Mimetype:      proto.String("application/octet-stream"),
-				FileEncSha256: uploadedDoc.FileEncSHA256,
-				FileSha256:    uploadedDoc.FileSHA256,
-				FileLength:    proto.Uint64(uint64(fileInfo.Size())),
-			},
-		})
-		
+		uploadType = whatsmeow.MediaDocument
 	default:
 		return "", fmt.Errorf("tipo de mídia não suportado: %s", mediaType)
 	}
-	
+
+	// Fazer upload do arquivo
+	uploadResp, err := client.WAClient.Upload(ctx, fileData, uploadType)
+	if err != nil {
+		return "", fmt.Errorf("falha ao fazer upload: %w", err)
+	}
+
+	// Enviar conforme o tipo de mídia
+	switch mediaType {
+	case "image", "img":
+		imageMsg := &waE2E.ImageMessage{
+			Caption:       proto.String(caption),
+			Mimetype:      proto.String("image/jpeg"),
+			URL:           &uploadResp.URL,
+			DirectPath:    &uploadResp.DirectPath,
+			MediaKey:      uploadResp.MediaKey,
+			FileEncSHA256: uploadResp.FileEncSHA256,
+			FileSHA256:    uploadResp.FileSHA256,
+			FileLength:    &uploadResp.FileLength,
+		}
+
+		msg, err = client.WAClient.SendMessage(ctx, recipient, &waE2E.Message{
+			ImageMessage: imageMsg,
+		})
+
+	case "video", "vid":
+		videoMsg := &waE2E.VideoMessage{
+			Caption:       proto.String(caption),
+			Mimetype:      proto.String("video/mp4"),
+			URL:           &uploadResp.URL,
+			DirectPath:    &uploadResp.DirectPath,
+			MediaKey:      uploadResp.MediaKey,
+			FileEncSHA256: uploadResp.FileEncSHA256,
+			FileSHA256:    uploadResp.FileSHA256,
+			FileLength:    &uploadResp.FileLength,
+		}
+
+		msg, err = client.WAClient.SendMessage(ctx, recipient, &waE2E.Message{
+			VideoMessage: videoMsg,
+		})
+
+	case "audio", "voice":
+		audioMsg := &waE2E.AudioMessage{
+			Mimetype:      proto.String("audio/mpeg"),
+			URL:           &uploadResp.URL,
+			DirectPath:    &uploadResp.DirectPath,
+			MediaKey:      uploadResp.MediaKey,
+			FileEncSHA256: uploadResp.FileEncSHA256,
+			FileSHA256:    uploadResp.FileSHA256,
+			FileLength:    &uploadResp.FileLength,
+			PTT:           proto.Bool(mediaType == "voice"),
+		}
+
+		msg, err = client.WAClient.SendMessage(ctx, recipient, &waE2E.Message{
+			AudioMessage: audioMsg,
+		})
+
+	case "document", "doc", "file":
+		documentMsg := &waE2E.DocumentMessage{
+			Caption:       proto.String(caption),
+			FileName:      proto.String(fileInfo.Name()),
+			Mimetype:      proto.String("application/octet-stream"),
+			URL:           &uploadResp.URL,
+			DirectPath:    &uploadResp.DirectPath,
+			MediaKey:      uploadResp.MediaKey,
+			FileEncSHA256: uploadResp.FileEncSHA256,
+			FileSHA256:    uploadResp.FileSHA256,
+			FileLength:    &uploadResp.FileLength,
+		}
+
+		msg, err = client.WAClient.SendMessage(ctx, recipient, &waE2E.Message{
+			DocumentMessage: documentMsg,
+		})
+	}
+
 	if err != nil {
 		return "", fmt.Errorf("falha ao enviar mídia: %w", err)
 	}
-	
+
 	// Atualizar última atividade
 	client.LastActive = time.Now()
-	
+
 	// Log
 	logger.Debug("Mensagem de mídia enviada", "user_id", userID, "to", to, "type", mediaType, "message_id", msg.ID)
-	
+
 	return msg.ID, nil
 }
 
@@ -233,55 +239,57 @@ func (sm *SessionManager) SendButtons(userID, to, text, footer string, buttons [
 	if !exists {
 		return "", fmt.Errorf("sessão não encontrada: %s", userID)
 	}
-	
+
 	// Converter para JID
 	recipient, err := ParseJID(to)
 	if err != nil {
 		return "", err
 	}
-	
-	// Criar botões
-	var btnItems []*proto.ButtonsMessage_Button
-	for _, btn := range buttons {
-		btnItems = append(btnItems, &proto.ButtonsMessage_Button{
-			ButtonId: proto.String(btn.ID),
-			ButtonText: &proto.ButtonsMessage_Button_ButtonText{
-				DisplayText: proto.String(btn.Text),
-			},
-			Type: proto.ButtonsMessage_Button_RESPONSE.Enum(),
-		})
-	}
-	
-	// Criar mensagem com botões
-	buttonsMessage := &proto.ButtonsMessage{
-		ContentText: proto.String(text),
-		Buttons:     btnItems,
-		HeaderType:  proto.ButtonsMessage_EMPTY.Enum(),
-	}
-	
-	if footer != "" {
-		buttonsMessage.FooterText = proto.String(footer)
-	}
-	
+
 	// Criar contexto com timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	
-	// Enviar mensagem com botões
-	msg, err := client.WAClient.SendMessage(ctx, recipient, &proto.Message{
+
+	// Criar botões
+	var btnItems []*waE2E.ButtonsMessage_Button
+	for _, btn := range buttons {
+		btnItems = append(btnItems, &waE2E.ButtonsMessage_Button{
+			ButtonID: proto.String(btn.ID),
+			ButtonText: &waE2E.ButtonsMessage_Button_ButtonText{
+				DisplayText: proto.String(btn.Text),
+			},
+			Type: waE2E.ButtonsMessage_Button_RESPONSE.Enum(),
+		})
+	}
+
+	// Criar mensagem com botões
+	buttonsMessage := &waE2E.ButtonsMessage{
+		ContentText: proto.String(text),
+		Buttons:     btnItems,
+		HeaderType:  waE2E.ButtonsMessage_EMPTY.Enum(),
+	}
+
+	if footer != "" {
+		buttonsMessage.FooterText = proto.String(footer)
+	}
+
+	// Criar message wrapper
+	message := &waE2E.Message{
 		ButtonsMessage: buttonsMessage,
-	})
-	
+	}
+
+	// Enviar mensagem com botões
+	msg, err := client.WAClient.SendMessage(ctx, recipient, message)
 	if err != nil {
 		return "", fmt.Errorf("falha ao enviar mensagem com botões: %w", err)
 	}
-	
+
 	// Atualizar última atividade
 	client.LastActive = time.Now()
-	
+
 	// Log
 	logger.Debug("Mensagem com botões enviada", "user_id", userID, "to", to, "message_id", msg.ID)
-	
+
 	return msg.ID, nil
 }
 
@@ -291,62 +299,71 @@ func (sm *SessionManager) SendList(userID, to, text, footer, buttonText string, 
 	if !exists {
 		return "", fmt.Errorf("sessão não encontrada: %s", userID)
 	}
-	
+
 	// Converter para JID
 	recipient, err := ParseJID(to)
 	if err != nil {
 		return "", err
 	}
-	
+
+	// Criar contexto com timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	// Criar seções
-	var listSections []*proto.ListMessage_Section
+	var listSections []*waE2E.ListMessage_Section
 	for _, section := range sections {
-		var rows []*proto.ListMessage_Row
-		
+		var rows []*waE2E.ListMessage_Row
+
 		for _, row := range section.Rows {
-			rows = append(rows, &proto.ListMessage_Row{
-				RowId: proto.String(row.ID),
+			rowEntry := &waE2E.ListMessage_Row{
+				RowID: proto.String(row.ID),
 				Title: proto.String(row.Title),
-				Description: proto.String(row.Description),
-			})
+			}
+
+			if row.Description != "" {
+				rowEntry.Description = proto.String(row.Description)
+			}
+
+			rows = append(rows, rowEntry)
 		}
-		
-		listSections = append(listSections, &proto.ListMessage_Section{
+
+		listSections = append(listSections, &waE2E.ListMessage_Section{
 			Title: proto.String(section.Title),
 			Rows:  rows,
 		})
 	}
-	
+
 	// Criar mensagem de lista
-	listMessage := &proto.ListMessage{
-		Description:    proto.String(text),
-		Sections:       listSections,
-		ButtonText:     proto.String(buttonText),
-		ListType:       proto.ListMessage_SINGLE_SELECT.Enum(),
+	listMessage := &waE2E.ListMessage{
+		// Nota: o exemplo usa Title e Description, mas seu código usa apenas Description
+		// Adaptando para seguir seu modelo original, mas você pode querer adicionar Title se necessário
+		Description: proto.String(text),
+		Sections:    listSections,
+		ButtonText:  proto.String(buttonText),
+		ListType:    waE2E.ListMessage_SINGLE_SELECT.Enum(),
 	}
-	
+
 	if footer != "" {
 		listMessage.FooterText = proto.String(footer)
 	}
-	
-	// Criar contexto com timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	
-	// Enviar mensagem de lista
-	msg, err := client.WAClient.SendMessage(ctx, recipient, &proto.Message{
+
+	// Criar message wrapper
+	message := &waE2E.Message{
 		ListMessage: listMessage,
-	})
-	
+	}
+
+	// Enviar mensagem de lista
+	msg, err := client.WAClient.SendMessage(ctx, recipient, message)
 	if err != nil {
 		return "", fmt.Errorf("falha ao enviar mensagem de lista: %w", err)
 	}
-	
+
 	// Atualizar última atividade
 	client.LastActive = time.Now()
-	
+
 	// Log
 	logger.Debug("Mensagem de lista enviada", "user_id", userID, "to", to, "message_id", msg.ID)
-	
+
 	return msg.ID, nil
 }

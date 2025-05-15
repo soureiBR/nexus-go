@@ -1,6 +1,6 @@
 # Dockerfile multistage para aplicação Go
 # Stage 1: Build
-FROM golang:1.23.9-alpine AS builder
+FROM golang:1.24.3-alpine AS builder
 
 # Instalar dependências de build
 RUN apk add --no-cache gcc musl-dev

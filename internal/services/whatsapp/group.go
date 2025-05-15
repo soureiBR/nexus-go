@@ -2,32 +2,30 @@
 package whatsapp
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"time"
-	
+
 	"go.mau.fi/whatsmeow"
-	"go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/types"
-	
+
 	"yourproject/pkg/logger"
 )
 
 // GroupParticipant representa um participante do grupo
 type GroupParticipant struct {
-	JID       string `json:"jid"`
-	IsAdmin   bool   `json:"is_admin"`
-	IsSuperAdmin bool `json:"is_super_admin"`
+	JID          string `json:"jid"`
+	IsAdmin      bool   `json:"is_admin"`
+	IsSuperAdmin bool   `json:"is_super_admin"`
 }
 
 // GroupInfo representa informações de um grupo
 type GroupInfo struct {
-	JID         string            `json:"jid"`
-	Name        string            `json:"name"`
-	Topic       string            `json:"topic,omitempty"`
-	Created     time.Time         `json:"created"`
-	Creator     string            `json:"creator"`
+	JID          string             `json:"jid"`
+	Name         string             `json:"name"`
+	Topic        string             `json:"topic,omitempty"`
+	Created      time.Time          `json:"created"`
+	Creator      string             `json:"creator"`
 	Participants []GroupParticipant `json:"participants"`
 }
 
@@ -37,7 +35,7 @@ func (sm *SessionManager) CreateGroup(userID, name string, participants []string
 	if !exists {
 		return nil, fmt.Errorf("sessão não encontrada: %s", userID)
 	}
-	
+
 	// Converter JIDs dos participantes
 	var jids []types.JID
 	for _, p := range participants {
@@ -47,39 +45,39 @@ func (sm *SessionManager) CreateGroup(userID, name string, participants []string
 		}
 		jids = append(jids, jid)
 	}
-	
-	// Criar contexto com timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	
+
 	// Criar grupo
-	group, err := client.WAClient.CreateGroup(ctx, name, jids)
+	req := whatsmeow.ReqCreateGroup{
+		Name:         name,
+		Participants: jids,
+	}
+	group, err := client.WAClient.CreateGroup(req)
 	if err != nil {
 		return nil, fmt.Errorf("falha ao criar grupo: %w", err)
 	}
-	
+
 	// Atualizar última atividade
 	client.LastActive = time.Now()
-	
+
 	// Log
 	logger.Debug("Grupo criado", "user_id", userID, "group_name", name, "group_jid", group.JID.String())
-	
+
 	// Construir e retornar informações do grupo
-	participants = make([]GroupParticipant, len(group.Participants))
+	groupParticipants := make([]GroupParticipant, len(group.Participants))
 	for i, p := range group.Participants {
-		participants[i] = GroupParticipant{
-			JID:       p.JID.String(),
-			IsAdmin:   p.IsAdmin,
+		groupParticipants[i] = GroupParticipant{
+			JID:          p.JID.String(),
+			IsAdmin:      p.IsAdmin,
 			IsSuperAdmin: p.IsSuperAdmin,
 		}
 	}
-	
+
 	return &GroupInfo{
-		JID:         group.JID.String(),
-		Name:        name,
-		Created:     time.Now(),
-		Creator:     userID,
-		Participants: participants,
+		JID:          group.JID.String(),
+		Name:         name,
+		Created:      time.Now(),
+		Creator:      userID,
+		Participants: groupParticipants,
 	}, nil
 }
 
@@ -89,47 +87,42 @@ func (sm *SessionManager) GetGroupInfo(userID, groupJID string) (*GroupInfo, err
 	if !exists {
 		return nil, fmt.Errorf("sessão não encontrada: %s", userID)
 	}
-	
+
 	// Converter para JID
 	jid, err := types.ParseJID(groupJID)
 	if err != nil {
 		return nil, fmt.Errorf("JID de grupo inválido: %w", err)
 	}
-	
+
 	// Verificar se é realmente um grupo
-	if !jid.IsGroup() {
+	if jid.Server != types.GroupServer {
 		return nil, fmt.Errorf("JID não é um grupo: %s", groupJID)
 	}
-	
-	// Criar contexto com timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	
+
 	// Obter informações do grupo
-	groupInfo, err := client.WAClient.GetGroupInfo(ctx, jid)
+	groupInfo, err := client.WAClient.GetGroupInfo(jid)
 	if err != nil {
 		return nil, fmt.Errorf("falha ao obter informações do grupo: %w", err)
 	}
-	
+
 	// Converter participantes
 	participants := make([]GroupParticipant, len(groupInfo.Participants))
 	for i, p := range groupInfo.Participants {
 		participants[i] = GroupParticipant{
-			JID:       p.JID.String(),
-			IsAdmin:   p.IsAdmin,
+			JID:          p.JID.String(),
+			IsAdmin:      p.IsAdmin,
 			IsSuperAdmin: p.IsSuperAdmin,
 		}
 	}
-	
+
 	// Atualizar última atividade
 	client.LastActive = time.Now()
-	
+
 	return &GroupInfo{
-		JID:         jid.String(),
-		Name:        groupInfo.Name,
-		Topic:       groupInfo.Topic,
-		Created:     time.Unix(int64(groupInfo.Creation), 0),
-		Creator:     groupInfo.OwnerJID.String(),
+		JID:          jid.String(),
+		Name:         groupInfo.Name,
+		Topic:        groupInfo.Topic,
+		Creator:      groupInfo.OwnerJID.String(),
 		Participants: participants,
 	}, nil
 }
@@ -140,18 +133,18 @@ func (sm *SessionManager) AddGroupParticipants(userID, groupJID string, particip
 	if !exists {
 		return fmt.Errorf("sessão não encontrada: %s", userID)
 	}
-	
+
 	// Converter para JID do grupo
 	groupID, err := types.ParseJID(groupJID)
 	if err != nil {
 		return fmt.Errorf("JID de grupo inválido: %w", err)
 	}
-	
+
 	// Verificar se é realmente um grupo
-	if !groupID.IsGroup() {
+	if groupID.Server != types.GroupServer {
 		return fmt.Errorf("JID não é um grupo: %s", groupJID)
 	}
-	
+
 	// Converter JIDs dos participantes
 	var jids []types.JID
 	for _, p := range participants {
@@ -161,26 +154,22 @@ func (sm *SessionManager) AddGroupParticipants(userID, groupJID string, particip
 		}
 		jids = append(jids, jid)
 	}
-	
-	// Criar contexto com timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	
-	// Adicionar participantes
-	err = client.WAClient.AddGroupParticipants(ctx, groupID, jids)
+
+	// Adicionar participantes - usando a ação ADD (adicionar)
+	_, err = client.WAClient.UpdateGroupParticipants(groupID, jids, whatsmeow.ParticipantChangeAdd)
 	if err != nil {
 		return fmt.Errorf("falha ao adicionar participantes ao grupo: %w", err)
 	}
-	
+
 	// Atualizar última atividade
 	client.LastActive = time.Now()
-	
+
 	// Log
-	logger.Debug("Participantes adicionados ao grupo", 
-		"user_id", userID, 
-		"group_jid", groupJID, 
+	logger.Debug("Participantes adicionados ao grupo",
+		"user_id", userID,
+		"group_jid", groupJID,
 		"participants_count", len(participants))
-	
+
 	return nil
 }
 
@@ -190,18 +179,18 @@ func (sm *SessionManager) RemoveGroupParticipants(userID, groupJID string, parti
 	if !exists {
 		return fmt.Errorf("sessão não encontrada: %s", userID)
 	}
-	
+
 	// Converter para JID do grupo
 	groupID, err := types.ParseJID(groupJID)
 	if err != nil {
 		return fmt.Errorf("JID de grupo inválido: %w", err)
 	}
-	
+
 	// Verificar se é realmente um grupo
-	if !groupID.IsGroup() {
+	if groupID.Server != types.GroupServer {
 		return fmt.Errorf("JID não é um grupo: %s", groupJID)
 	}
-	
+
 	// Converter JIDs dos participantes
 	var jids []types.JID
 	for _, p := range participants {
@@ -211,26 +200,22 @@ func (sm *SessionManager) RemoveGroupParticipants(userID, groupJID string, parti
 		}
 		jids = append(jids, jid)
 	}
-	
-	// Criar contexto com timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	
-	// Remover participantes
-	err = client.WAClient.RemoveGroupParticipants(ctx, groupID, jids)
+
+	// Remover participantes - usando a ação REMOVE (remover)
+	_, err = client.WAClient.UpdateGroupParticipants(groupID, jids, whatsmeow.ParticipantChangeRemove)
 	if err != nil {
 		return fmt.Errorf("falha ao remover participantes do grupo: %w", err)
 	}
-	
+
 	// Atualizar última atividade
 	client.LastActive = time.Now()
-	
+
 	// Log
-	logger.Debug("Participantes removidos do grupo", 
-		"user_id", userID, 
-		"group_jid", groupJID, 
+	logger.Debug("Participantes removidos do grupo",
+		"user_id", userID,
+		"group_jid", groupJID,
 		"participants_count", len(participants))
-	
+
 	return nil
 }
 
@@ -240,18 +225,18 @@ func (sm *SessionManager) PromoteGroupParticipants(userID, groupJID string, part
 	if !exists {
 		return fmt.Errorf("sessão não encontrada: %s", userID)
 	}
-	
+
 	// Converter para JID do grupo
 	groupID, err := types.ParseJID(groupJID)
 	if err != nil {
 		return fmt.Errorf("JID de grupo inválido: %w", err)
 	}
-	
+
 	// Verificar se é realmente um grupo
-	if !groupID.IsGroup() {
+	if groupID.Server != types.GroupServer {
 		return fmt.Errorf("JID não é um grupo: %s", groupJID)
 	}
-	
+
 	// Converter JIDs dos participantes
 	var jids []types.JID
 	for _, p := range participants {
@@ -261,26 +246,22 @@ func (sm *SessionManager) PromoteGroupParticipants(userID, groupJID string, part
 		}
 		jids = append(jids, jid)
 	}
-	
-	// Criar contexto com timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	
+
 	// Promover participantes
-	err = client.WAClient.PromoteGroupParticipants(ctx, groupID, jids)
+	_, err = client.WAClient.UpdateGroupParticipants(groupID, jids, whatsmeow.ParticipantChangePromote)
 	if err != nil {
 		return fmt.Errorf("falha ao promover participantes do grupo: %w", err)
 	}
-	
+
 	// Atualizar última atividade
 	client.LastActive = time.Now()
-	
+
 	// Log
-	logger.Debug("Participantes promovidos a admins", 
-		"user_id", userID, 
-		"group_jid", groupJID, 
+	logger.Debug("Participantes promovidos a admins",
+		"user_id", userID,
+		"group_jid", groupJID,
 		"participants_count", len(participants))
-	
+
 	return nil
 }
 
@@ -290,18 +271,18 @@ func (sm *SessionManager) DemoteGroupParticipants(userID, groupJID string, parti
 	if !exists {
 		return fmt.Errorf("sessão não encontrada: %s", userID)
 	}
-	
+
 	// Converter para JID do grupo
 	groupID, err := types.ParseJID(groupJID)
 	if err != nil {
 		return fmt.Errorf("JID de grupo inválido: %w", err)
 	}
-	
+
 	// Verificar se é realmente um grupo
-	if !groupID.IsGroup() {
+	if groupID.Server != types.GroupServer {
 		return fmt.Errorf("JID não é um grupo: %s", groupJID)
 	}
-	
+
 	// Converter JIDs dos participantes
 	var jids []types.JID
 	for _, p := range participants {
@@ -311,26 +292,22 @@ func (sm *SessionManager) DemoteGroupParticipants(userID, groupJID string, parti
 		}
 		jids = append(jids, jid)
 	}
-	
-	// Criar contexto com timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	
+
 	// Rebaixar participantes
-	err = client.WAClient.DemoteGroupParticipants(ctx, groupID, jids)
+	_, err = client.WAClient.UpdateGroupParticipants(groupID, jids, whatsmeow.ParticipantChangeDemote)
 	if err != nil {
 		return fmt.Errorf("falha ao rebaixar participantes do grupo: %w", err)
 	}
-	
+
 	// Atualizar última atividade
 	client.LastActive = time.Now()
-	
+
 	// Log
-	logger.Debug("Admins rebaixados a participantes comuns", 
-		"user_id", userID, 
-		"group_jid", groupJID, 
+	logger.Debug("Admins rebaixados a participantes comuns",
+		"user_id", userID,
+		"group_jid", groupJID,
 		"participants_count", len(participants))
-	
+
 	return nil
 }
 
@@ -340,37 +317,33 @@ func (sm *SessionManager) UpdateGroupName(userID, groupJID, newName string) erro
 	if !exists {
 		return fmt.Errorf("sessão não encontrada: %s", userID)
 	}
-	
+
 	// Converter para JID do grupo
 	groupID, err := types.ParseJID(groupJID)
 	if err != nil {
 		return fmt.Errorf("JID de grupo inválido: %w", err)
 	}
-	
+
 	// Verificar se é realmente um grupo
-	if !groupID.IsGroup() {
+	if groupID.Server != types.GroupServer {
 		return fmt.Errorf("JID não é um grupo: %s", groupJID)
 	}
-	
-	// Criar contexto com timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	
+
 	// Atualizar nome do grupo
-	err = client.WAClient.UpdateGroupName(ctx, groupID, newName)
+	err = client.WAClient.SetGroupName(groupID, newName)
 	if err != nil {
 		return fmt.Errorf("falha ao atualizar nome do grupo: %w", err)
 	}
-	
+
 	// Atualizar última atividade
 	client.LastActive = time.Now()
-	
+
 	// Log
-	logger.Debug("Nome do grupo atualizado", 
-		"user_id", userID, 
-		"group_jid", groupJID, 
+	logger.Debug("Nome do grupo atualizado",
+		"user_id", userID,
+		"group_jid", groupJID,
 		"new_name", newName)
-	
+
 	return nil
 }
 
@@ -380,36 +353,32 @@ func (sm *SessionManager) UpdateGroupTopic(userID, groupJID, newTopic string) er
 	if !exists {
 		return fmt.Errorf("sessão não encontrada: %s", userID)
 	}
-	
+
 	// Converter para JID do grupo
 	groupID, err := types.ParseJID(groupJID)
 	if err != nil {
 		return fmt.Errorf("JID de grupo inválido: %w", err)
 	}
-	
+
 	// Verificar se é realmente um grupo
-	if !groupID.IsGroup() {
+	if groupID.Server != types.GroupServer {
 		return fmt.Errorf("JID não é um grupo: %s", groupJID)
 	}
-	
-	// Criar contexto com timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	
+
 	// Atualizar tópico do grupo
-	err = client.WAClient.UpdateGroupTopic(ctx, groupID, newTopic)
+	err = client.WAClient.SetGroupDescription(groupID, newTopic)
 	if err != nil {
 		return fmt.Errorf("falha ao atualizar tópico do grupo: %w", err)
 	}
-	
+
 	// Atualizar última atividade
 	client.LastActive = time.Now()
-	
+
 	// Log
-	logger.Debug("Tópico do grupo atualizado", 
-		"user_id", userID, 
+	logger.Debug("Tópico do grupo atualizado",
+		"user_id", userID,
 		"group_jid", groupJID)
-	
+
 	return nil
 }
 
@@ -419,36 +388,32 @@ func (sm *SessionManager) LeaveGroup(userID, groupJID string) error {
 	if !exists {
 		return fmt.Errorf("sessão não encontrada: %s", userID)
 	}
-	
+
 	// Converter para JID do grupo
 	groupID, err := types.ParseJID(groupJID)
 	if err != nil {
 		return fmt.Errorf("JID de grupo inválido: %w", err)
 	}
-	
+
 	// Verificar se é realmente um grupo
-	if !groupID.IsGroup() {
+	if groupID.Server != types.GroupServer {
 		return fmt.Errorf("JID não é um grupo: %s", groupJID)
 	}
-	
-	// Criar contexto com timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	
+
 	// Sair do grupo
-	err = client.WAClient.LeaveGroup(ctx, groupID)
+	err = client.WAClient.LeaveGroup(groupID)
 	if err != nil {
 		return fmt.Errorf("falha ao sair do grupo: %w", err)
 	}
-	
+
 	// Atualizar última atividade
 	client.LastActive = time.Now()
-	
+
 	// Log
-	logger.Debug("Saiu do grupo", 
-		"user_id", userID, 
+	logger.Debug("Saiu do grupo",
+		"user_id", userID,
 		"group_jid", groupJID)
-	
+
 	return nil
 }
 
@@ -458,17 +423,13 @@ func (sm *SessionManager) GetJoinedGroups(userID string) ([]GroupInfo, error) {
 	if !exists {
 		return nil, fmt.Errorf("sessão não encontrada: %s", userID)
 	}
-	
-	// Criar contexto com timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	
+
 	// Obter lista de grupos
-	groups, err := client.WAClient.GetJoinedGroups(ctx)
+	groups, err := client.WAClient.GetJoinedGroups()
 	if err != nil {
 		return nil, fmt.Errorf("falha ao obter lista de grupos: %w", err)
 	}
-	
+
 	// Converter para formato de resposta
 	result := make([]GroupInfo, len(groups))
 	for i, group := range groups {
@@ -476,30 +437,29 @@ func (sm *SessionManager) GetJoinedGroups(userID string) ([]GroupInfo, error) {
 		participants := make([]GroupParticipant, len(group.Participants))
 		for j, p := range group.Participants {
 			participants[j] = GroupParticipant{
-				JID:         p.JID.String(),
-				IsAdmin:     p.IsAdmin,
+				JID:          p.JID.String(),
+				IsAdmin:      p.IsAdmin,
 				IsSuperAdmin: p.IsSuperAdmin,
 			}
 		}
-		
+
 		result[i] = GroupInfo{
 			JID:          group.JID.String(),
 			Name:         group.Name,
 			Topic:        group.Topic,
-			Created:      time.Unix(int64(group.Creation), 0),
 			Creator:      group.OwnerJID.String(),
 			Participants: participants,
 		}
 	}
-	
+
 	// Atualizar última atividade
 	client.LastActive = time.Now()
-	
+
 	// Log
-	logger.Debug("Lista de grupos obtida", 
-		"user_id", userID, 
+	logger.Debug("Lista de grupos obtida",
+		"user_id", userID,
 		"groups_count", len(groups))
-	
+
 	return result, nil
 }
 
@@ -509,36 +469,32 @@ func (sm *SessionManager) GetGroupInviteLink(userID, groupJID string) (string, e
 	if !exists {
 		return "", fmt.Errorf("sessão não encontrada: %s", userID)
 	}
-	
+
 	// Converter para JID do grupo
 	groupID, err := types.ParseJID(groupJID)
 	if err != nil {
 		return "", fmt.Errorf("JID de grupo inválido: %w", err)
 	}
-	
+
 	// Verificar se é realmente um grupo
-	if !groupID.IsGroup() {
+	if groupID.Server != types.GroupServer {
 		return "", fmt.Errorf("JID não é um grupo: %s", groupJID)
 	}
-	
-	// Criar contexto com timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	
+
 	// Obter link de convite
-	link, err := client.WAClient.GetGroupInviteLink(ctx, groupID, false)
+	link, err := client.WAClient.GetGroupInviteLink(groupID, false)
 	if err != nil {
 		return "", fmt.Errorf("falha ao obter link de convite: %w", err)
 	}
-	
+
 	// Atualizar última atividade
 	client.LastActive = time.Now()
-	
+
 	// Log
-	logger.Debug("Link de convite obtido", 
-		"user_id", userID, 
+	logger.Debug("Link de convite obtido",
+		"user_id", userID,
 		"group_jid", groupJID)
-	
+
 	return link, nil
 }
 
@@ -548,36 +504,32 @@ func (sm *SessionManager) RevokeGroupInviteLink(userID, groupJID string) (string
 	if !exists {
 		return "", fmt.Errorf("sessão não encontrada: %s", userID)
 	}
-	
+
 	// Converter para JID do grupo
 	groupID, err := types.ParseJID(groupJID)
 	if err != nil {
 		return "", fmt.Errorf("JID de grupo inválido: %w", err)
 	}
-	
+
 	// Verificar se é realmente um grupo
-	if !groupID.IsGroup() {
+	if groupID.Server != types.GroupServer {
 		return "", fmt.Errorf("JID não é um grupo: %s", groupJID)
 	}
-	
-	// Criar contexto com timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	
+
 	// Revogar link atual e obter novo
-	link, err := client.WAClient.GetGroupInviteLink(ctx, groupID, true)
+	link, err := client.WAClient.GetGroupInviteLink(groupID, true)
 	if err != nil {
 		return "", fmt.Errorf("falha ao revogar link de convite: %w", err)
 	}
-	
+
 	// Atualizar última atividade
 	client.LastActive = time.Now()
-	
+
 	// Log
-	logger.Debug("Link de convite revogado e novo link obtido", 
-		"user_id", userID, 
+	logger.Debug("Link de convite revogado e novo link obtido",
+		"user_id", userID,
 		"group_jid", groupJID)
-	
+
 	return link, nil
 }
 
@@ -587,7 +539,7 @@ func (sm *SessionManager) JoinGroupWithLink(userID, link string) (*GroupInfo, er
 	if !exists {
 		return nil, fmt.Errorf("sessão não encontrada: %s", userID)
 	}
-	
+
 	// Normalizar link de convite
 	if !strings.HasPrefix(link, "https://chat.whatsapp.com/") {
 		// Verificar se é apenas o código
@@ -597,28 +549,24 @@ func (sm *SessionManager) JoinGroupWithLink(userID, link string) (*GroupInfo, er
 			return nil, fmt.Errorf("link de convite inválido: %s", link)
 		}
 	}
-	
+
 	// Extrair código do link
 	code := strings.TrimPrefix(link, "https://chat.whatsapp.com/")
-	
-	// Criar contexto com timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	
+
 	// Entrar no grupo
-	groupID, err := client.WAClient.JoinGroupWithLink(ctx, code)
+	groupID, err := client.WAClient.JoinGroupWithLink(code)
 	if err != nil {
 		return nil, fmt.Errorf("falha ao entrar no grupo: %w", err)
 	}
-	
+
 	// Atualizar última atividade
 	client.LastActive = time.Now()
-	
+
 	// Log
-	logger.Debug("Entrou no grupo via link", 
-		"user_id", userID, 
+	logger.Debug("Entrou no grupo via link",
+		"user_id", userID,
 		"group_jid", groupID.String())
-	
+
 	// Obter informações do grupo
 	return sm.GetGroupInfo(userID, groupID.String())
 }
