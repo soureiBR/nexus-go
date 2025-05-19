@@ -48,7 +48,7 @@ func (h *SessionHandler) CreateSession(c *gin.Context) {
 	}
 
 	// Criar sessão
-	client, err := h.sessionManager.CreateSession(req.UserID)
+	client, err := h.sessionManager.CreateSession(c.Request.Context(), req.UserID)
 	if err != nil {
 		logger.Error("Falha ao criar sessão", "error", err, "user_id", req.UserID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao criar sessão", "details": err.Error()})
@@ -118,7 +118,7 @@ func (h *SessionHandler) GetQRCode(c *gin.Context) {
 	}
 
 	// Obter código QR
-	qrChan, err := h.sessionManager.GetQRChannel(id)
+	qrChan, err := h.sessionManager.GetQRChannel(c.Request.Context(), id)
 	if err != nil {
 		logger.Error("Falha ao obter canal QR", "error", err, "user_id", id)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao gerar QR code", "details": err.Error()})
@@ -157,7 +157,7 @@ func (h *SessionHandler) DeleteSession(c *gin.Context) {
 	}
 
 	// Excluir sessão
-	if err := h.sessionManager.DeleteSession(id); err != nil {
+	if err := h.sessionManager.DeleteSession(c.Request.Context(), id); err != nil {
 		logger.Error("Falha ao excluir sessão", "error", err, "user_id", id)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao excluir sessão", "details": err.Error()})
 		return
@@ -175,7 +175,7 @@ func (h *SessionHandler) ConnectSession(c *gin.Context) {
 	}
 
 	// Iniciar conexão
-	err := h.sessionManager.Connect(id)
+	err := h.sessionManager.Connect(c.Request.Context(), id)
 	if err != nil {
 		logger.Error("Falha ao conectar sessão", "error", err, "user_id", id)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao conectar ao WhatsApp", "details": err.Error()})
@@ -202,4 +202,23 @@ func (h *SessionHandler) DisconnectSession(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Desconectado do WhatsApp"})
+}
+
+// LogoutSession encerra e remove a sessão do WhatsApp
+func (h *SessionHandler) LogoutSession(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID da sessão é obrigatório"})
+		return
+	}
+
+	// Fazer logout da sessão
+	err := h.sessionManager.Logout(c.Request.Context(), id)
+	if err != nil {
+		logger.Error("Falha ao fazer logout da sessão", "error", err, "user_id", id)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao fazer logout do WhatsApp", "details": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Logout realizado com sucesso"})
 }

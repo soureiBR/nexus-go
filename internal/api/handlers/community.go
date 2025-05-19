@@ -3,9 +3,9 @@ package handlers
 
 import (
 	"net/http"
-	
+
 	"github.com/gin-gonic/gin"
-	
+
 	"yourproject/internal/services/whatsapp"
 	"yourproject/pkg/logger"
 )
@@ -24,9 +24,10 @@ func NewCommunityHandler(sm *whatsapp.SessionManager) *CommunityHandler {
 
 // CreateCommunityRequest representa a requisição para criar uma comunidade
 type CreateCommunityRequest struct {
-	UserID      string `json:"user_id" binding:"required"`
-	Name        string `json:"name" binding:"required"`
-	Description string `json:"description"`
+	UserID       string   `json:"user_id" binding:"required"`
+	Name         string   `json:"name" binding:"required"`
+	Description  string   `json:"description"`
+	Participants []string `json:"participants" binding:"required,min=1"`
 }
 
 // UpdateCommunityNameRequest representa a requisição para atualizar nome da comunidade
@@ -109,15 +110,15 @@ func (h *CommunityHandler) CreateCommunity(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
 		return
 	}
-	
+
 	// Criar comunidade
-	community, err := h.sessionManager.CreateCommunity(req.UserID, req.Name, req.Description)
+	community, err := h.sessionManager.CreateCommunity(req.UserID, req.Name, req.Participants)
 	if err != nil {
 		logger.Error("Falha ao criar comunidade", "error", err, "user_id", req.UserID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao criar comunidade", "details": err.Error()})
 		return
 	}
-	
+
 	c.JSON(http.StatusCreated, community)
 }
 
@@ -128,18 +129,18 @@ func (h *CommunityHandler) GetCommunityInfo(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
 		return
 	}
-	
+
 	// Obter informações da comunidade
 	community, err := h.sessionManager.GetCommunityInfo(req.UserID, req.CommunityJID)
 	if err != nil {
-		logger.Error("Falha ao obter informações da comunidade", 
-			"error", err, 
-			"user_id", req.UserID, 
+		logger.Error("Falha ao obter informações da comunidade",
+			"error", err,
+			"user_id", req.UserID,
 			"community_jid", req.CommunityJID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao obter informações da comunidade", "details": err.Error()})
 		return
 	}
-	
+
 	c.JSON(http.StatusOK, community)
 }
 
@@ -150,7 +151,7 @@ func (h *CommunityHandler) GetJoinedCommunities(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do usuário é obrigatório"})
 		return
 	}
-	
+
 	// Obter lista de comunidades
 	communities, err := h.sessionManager.GetJoinedCommunities(userID)
 	if err != nil {
@@ -158,7 +159,7 @@ func (h *CommunityHandler) GetJoinedCommunities(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao obter lista de comunidades", "details": err.Error()})
 		return
 	}
-	
+
 	c.JSON(http.StatusOK, communities)
 }
 
@@ -169,18 +170,18 @@ func (h *CommunityHandler) UpdateCommunityName(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
 		return
 	}
-	
+
 	// Atualizar nome da comunidade
 	err := h.sessionManager.UpdateCommunityName(req.UserID, req.CommunityJID, req.NewName)
 	if err != nil {
-		logger.Error("Falha ao atualizar nome da comunidade", 
-			"error", err, 
-			"user_id", req.UserID, 
+		logger.Error("Falha ao atualizar nome da comunidade",
+			"error", err,
+			"user_id", req.UserID,
 			"community_jid", req.CommunityJID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao atualizar nome da comunidade", "details": err.Error()})
 		return
 	}
-	
+
 	c.JSON(http.StatusOK, gin.H{"message": "Nome da comunidade atualizado com sucesso"})
 }
 
@@ -191,18 +192,18 @@ func (h *CommunityHandler) UpdateCommunityDescription(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
 		return
 	}
-	
+
 	// Atualizar descrição da comunidade
 	err := h.sessionManager.UpdateCommunityDescription(req.UserID, req.CommunityJID, req.NewDescription)
 	if err != nil {
-		logger.Error("Falha ao atualizar descrição da comunidade", 
-			"error", err, 
-			"user_id", req.UserID, 
+		logger.Error("Falha ao atualizar descrição da comunidade",
+			"error", err,
+			"user_id", req.UserID,
 			"community_jid", req.CommunityJID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao atualizar descrição da comunidade", "details": err.Error()})
 		return
 	}
-	
+
 	c.JSON(http.StatusOK, gin.H{"message": "Descrição da comunidade atualizada com sucesso"})
 }
 
@@ -213,18 +214,18 @@ func (h *CommunityHandler) LeaveCommunity(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
 		return
 	}
-	
+
 	// Sair da comunidade
 	err := h.sessionManager.LeaveCommunity(req.UserID, req.CommunityJID)
 	if err != nil {
-		logger.Error("Falha ao sair da comunidade", 
-			"error", err, 
-			"user_id", req.UserID, 
+		logger.Error("Falha ao sair da comunidade",
+			"error", err,
+			"user_id", req.UserID,
 			"community_jid", req.CommunityJID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao sair da comunidade", "details": err.Error()})
 		return
 	}
-	
+
 	c.JSON(http.StatusOK, gin.H{"message": "Saiu da comunidade com sucesso"})
 }
 
@@ -235,18 +236,18 @@ func (h *CommunityHandler) CreateGroupForCommunity(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
 		return
 	}
-	
+
 	// Criar grupo na comunidade
 	group, err := h.sessionManager.CreateGroupForCommunity(req.UserID, req.CommunityJID, req.GroupName, req.Participants)
 	if err != nil {
-		logger.Error("Falha ao criar grupo na comunidade", 
-			"error", err, 
-			"user_id", req.UserID, 
+		logger.Error("Falha ao criar grupo na comunidade",
+			"error", err,
+			"user_id", req.UserID,
 			"community_jid", req.CommunityJID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao criar grupo na comunidade", "details": err.Error()})
 		return
 	}
-	
+
 	c.JSON(http.StatusCreated, group)
 }
 
@@ -257,19 +258,19 @@ func (h *CommunityHandler) LinkGroupToCommunity(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
 		return
 	}
-	
+
 	// Vincular grupo à comunidade
 	err := h.sessionManager.LinkGroupToCommunity(req.UserID, req.CommunityJID, req.GroupJID)
 	if err != nil {
-		logger.Error("Falha ao vincular grupo à comunidade", 
-			"error", err, 
-			"user_id", req.UserID, 
-			"community_jid", req.CommunityJID, 
+		logger.Error("Falha ao vincular grupo à comunidade",
+			"error", err,
+			"user_id", req.UserID,
+			"community_jid", req.CommunityJID,
 			"group_jid", req.GroupJID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao vincular grupo à comunidade", "details": err.Error()})
 		return
 	}
-	
+
 	c.JSON(http.StatusOK, gin.H{"message": "Grupo vinculado à comunidade com sucesso"})
 }
 
@@ -280,19 +281,19 @@ func (h *CommunityHandler) UnlinkGroupFromCommunity(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
 		return
 	}
-	
+
 	// Desvincular grupo da comunidade
 	err := h.sessionManager.UnlinkGroupFromCommunity(req.UserID, req.CommunityJID, req.GroupJID)
 	if err != nil {
-		logger.Error("Falha ao desvincular grupo da comunidade", 
-			"error", err, 
-			"user_id", req.UserID, 
-			"community_jid", req.CommunityJID, 
+		logger.Error("Falha ao desvincular grupo da comunidade",
+			"error", err,
+			"user_id", req.UserID,
+			"community_jid", req.CommunityJID,
 			"group_jid", req.GroupJID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao desvincular grupo da comunidade", "details": err.Error()})
 		return
 	}
-	
+
 	c.JSON(http.StatusOK, gin.H{"message": "Grupo desvinculado da comunidade com sucesso"})
 }
 
@@ -303,7 +304,7 @@ func (h *CommunityHandler) JoinCommunityWithLink(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
 		return
 	}
-	
+
 	// Entrar na comunidade via link
 	community, err := h.sessionManager.JoinCommunityWithLink(req.UserID, req.Link)
 	if err != nil {
@@ -311,7 +312,7 @@ func (h *CommunityHandler) JoinCommunityWithLink(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao entrar na comunidade via link", "details": err.Error()})
 		return
 	}
-	
+
 	c.JSON(http.StatusOK, community)
 }
 
@@ -322,18 +323,18 @@ func (h *CommunityHandler) GetCommunityInviteLink(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
 		return
 	}
-	
+
 	// Obter link de convite
 	link, err := h.sessionManager.GetCommunityInviteLink(req.UserID, req.CommunityJID)
 	if err != nil {
-		logger.Error("Falha ao obter link de convite da comunidade", 
-			"error", err, 
-			"user_id", req.UserID, 
+		logger.Error("Falha ao obter link de convite da comunidade",
+			"error", err,
+			"user_id", req.UserID,
 			"community_jid", req.CommunityJID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao obter link de convite da comunidade", "details": err.Error()})
 		return
 	}
-	
+
 	c.JSON(http.StatusOK, gin.H{"invite_link": link})
 }
 
@@ -344,39 +345,17 @@ func (h *CommunityHandler) RevokeCommunityInviteLink(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
 		return
 	}
-	
+
 	// Revogar link atual e obter novo
 	link, err := h.sessionManager.RevokeCommunityInviteLink(req.UserID, req.CommunityJID)
 	if err != nil {
-		logger.Error("Falha ao revogar link de convite da comunidade", 
-			"error", err, 
-			"user_id", req.UserID, 
+		logger.Error("Falha ao revogar link de convite da comunidade",
+			"error", err,
+			"user_id", req.UserID,
 			"community_jid", req.CommunityJID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao revogar link de convite da comunidade", "details": err.Error()})
 		return
 	}
-	
-	c.JSON(http.StatusOK, gin.H{"invite_link": link})
-}
 
-// SendCommunityAnnouncement envia um anúncio para todos os grupos vinculados a uma comunidade
-func (h *CommunityHandler) SendCommunityAnnouncement(c *gin.Context) {
-	var req SendAnnouncementRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
-		return
-	}
-	
-	// Enviar anúncio para a comunidade
-	err := h.sessionManager.SendCommunityAnnouncement(req.UserID, req.CommunityJID, req.Message)
-	if err != nil {
-		logger.Error("Falha ao enviar anúncio para a comunidade", 
-			"error", err, 
-			"user_id", req.UserID, 
-			"community_jid", req.CommunityJID)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao enviar anúncio para a comunidade", "details": err.Error()})
-		return
-	}
-	
-	c.JSON(http.StatusOK, gin.H{"message": "Anúncio enviado com sucesso"})
+	c.JSON(http.StatusOK, gin.H{"invite_link": link})
 }
