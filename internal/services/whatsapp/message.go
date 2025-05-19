@@ -4,7 +4,8 @@ package whatsapp
 import (
 	"context"
 	"fmt"
-	"os"
+	"io"
+	"net/http"
 	"strings"
 	"time"
 
@@ -86,7 +87,7 @@ func (sm *SessionManager) SendText(userID, to, message string) (string, error) {
 }
 
 // SendMedia envia uma mensagem de mídia
-func (sm *SessionManager) SendMedia(userID, to, filePath, mediaType, caption string) (string, error) {
+func (sm *SessionManager) SendMedia(userID, to, mediaURL, mediaType, caption string) (string, error) {
 	client, exists := sm.GetSession(userID)
 	if !exists {
 		return "", fmt.Errorf("sessão não encontrada: %s", userID)
@@ -98,40 +99,31 @@ func (sm *SessionManager) SendMedia(userID, to, filePath, mediaType, caption str
 		return "", err
 	}
 
-	// Ler arquivo
-	fileData, err := os.ReadFile(filePath)
-	if err != nil {
-		return "", fmt.Errorf("falha ao ler arquivo: %w", err)
+	// Criar contexto com timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// Extrair o nome do arquivo da URL
+	fileName := mediaURL
+	if idx := strings.LastIndex(mediaURL, "/"); idx != -1 {
+		fileName = mediaURL[idx+1:]
 	}
 
-	// Obter informações do arquivo
-	fileInfo, err := os.Stat(filePath)
-	if err != nil {
-		return "", fmt.Errorf("falha ao obter informações do arquivo: %w", err)
-	}
-
-	// Determinar tipo de mídia se não especificado
+	// Se o tipo de mídia não foi especificado, tente determinar pela extensão do arquivo
 	if mediaType == "" {
-		// Tentar deduzir da extensão
 		switch {
-		case strings.HasSuffix(filePath, ".jpg"), strings.HasSuffix(filePath, ".jpeg"), strings.HasSuffix(filePath, ".png"):
+		case strings.HasSuffix(fileName, ".jpg"), strings.HasSuffix(fileName, ".jpeg"), strings.HasSuffix(fileName, ".png"):
 			mediaType = "image"
-		case strings.HasSuffix(filePath, ".mp4"), strings.HasSuffix(filePath, ".avi"), strings.HasSuffix(filePath, ".mov"):
+		case strings.HasSuffix(fileName, ".mp4"), strings.HasSuffix(fileName, ".avi"), strings.HasSuffix(fileName, ".mov"):
 			mediaType = "video"
-		case strings.HasSuffix(filePath, ".mp3"), strings.HasSuffix(filePath, ".wav"), strings.HasSuffix(filePath, ".ogg"):
+		case strings.HasSuffix(fileName, ".mp3"), strings.HasSuffix(fileName, ".wav"), strings.HasSuffix(fileName, ".ogg"):
 			mediaType = "audio"
 		default:
 			mediaType = "document"
 		}
 	}
 
-	// Criar contexto com timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	var msg whatsmeow.SendResponse
-
-	// Determinar tipo de upload baseado no tipo de mídia
+	// Determinar tipo de mídia para WhatsApp
 	var uploadType whatsmeow.MediaType
 	switch mediaType {
 	case "image", "img":
@@ -146,18 +138,41 @@ func (sm *SessionManager) SendMedia(userID, to, filePath, mediaType, caption str
 		return "", fmt.Errorf("tipo de mídia não suportado: %s", mediaType)
 	}
 
-	// Fazer upload do arquivo
+	// Fazer download da mídia da URL
+	logger.Debug("Baixando mídia da URL", "url", mediaURL)
+	httpClient := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+	resp, err := httpClient.Get(mediaURL)
+	if err != nil {
+		return "", fmt.Errorf("falha ao baixar mídia da URL: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("falha ao baixar mídia da URL: status %d", resp.StatusCode)
+	}
+
+	// Ler o conteúdo da resposta
+	fileData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("falha ao ler conteúdo da resposta: %w", err)
+	}
+
+	// Fazer upload do arquivo para o WhatsApp
 	uploadResp, err := client.WAClient.Upload(ctx, fileData, uploadType)
 	if err != nil {
 		return "", fmt.Errorf("falha ao fazer upload: %w", err)
 	}
+
+	var msg whatsmeow.SendResponse
 
 	// Enviar conforme o tipo de mídia
 	switch mediaType {
 	case "image", "img":
 		imageMsg := &waE2E.ImageMessage{
 			Caption:       proto.String(caption),
-			Mimetype:      proto.String("image/jpeg"),
+			Mimetype:      proto.String(resp.Header.Get("Content-Type")),
 			URL:           &uploadResp.URL,
 			DirectPath:    &uploadResp.DirectPath,
 			MediaKey:      uploadResp.MediaKey,
@@ -173,7 +188,7 @@ func (sm *SessionManager) SendMedia(userID, to, filePath, mediaType, caption str
 	case "video", "vid":
 		videoMsg := &waE2E.VideoMessage{
 			Caption:       proto.String(caption),
-			Mimetype:      proto.String("video/mp4"),
+			Mimetype:      proto.String(resp.Header.Get("Content-Type")),
 			URL:           &uploadResp.URL,
 			DirectPath:    &uploadResp.DirectPath,
 			MediaKey:      uploadResp.MediaKey,
@@ -188,7 +203,7 @@ func (sm *SessionManager) SendMedia(userID, to, filePath, mediaType, caption str
 
 	case "audio", "voice":
 		audioMsg := &waE2E.AudioMessage{
-			Mimetype:      proto.String("audio/mpeg"),
+			Mimetype:      proto.String(resp.Header.Get("Content-Type")),
 			URL:           &uploadResp.URL,
 			DirectPath:    &uploadResp.DirectPath,
 			MediaKey:      uploadResp.MediaKey,
@@ -205,8 +220,8 @@ func (sm *SessionManager) SendMedia(userID, to, filePath, mediaType, caption str
 	case "document", "doc", "file":
 		documentMsg := &waE2E.DocumentMessage{
 			Caption:       proto.String(caption),
-			FileName:      proto.String(fileInfo.Name()),
-			Mimetype:      proto.String("application/octet-stream"),
+			FileName:      proto.String(fileName),
+			Mimetype:      proto.String(resp.Header.Get("Content-Type")),
 			URL:           &uploadResp.URL,
 			DirectPath:    &uploadResp.DirectPath,
 			MediaKey:      uploadResp.MediaKey,
@@ -228,7 +243,7 @@ func (sm *SessionManager) SendMedia(userID, to, filePath, mediaType, caption str
 	client.LastActive = time.Now()
 
 	// Log
-	logger.Debug("Mensagem de mídia enviada", "user_id", userID, "to", to, "type", mediaType, "message_id", msg.ID)
+	logger.Debug("Mensagem de mídia da URL enviada", "user_id", userID, "to", to, "type", mediaType, "url", mediaURL, "message_id", msg.ID)
 
 	return msg.ID, nil
 }

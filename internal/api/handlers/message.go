@@ -25,10 +25,11 @@ type TextMessageRequest struct {
 }
 
 type MediaMessageRequest struct {
-	UserID    string `form:"user_id" binding:"required"`
-	To        string `form:"to" binding:"required"`
-	Caption   string `form:"caption"`
-	MediaType string `form:"media_type" binding:"required"`
+	UserID    string `json:"user_id" binding:"required"`
+	To        string `json:"to" binding:"required"`
+	Caption   string `json:"caption"`
+	MediaURL  string `json:"media_url" binding:"required"`
+	MediaType string `json:"media_type" binding:"required"`
 }
 
 type ButtonMessageRequest struct {
@@ -119,25 +120,16 @@ func (h *MessageHandler) SendText(c *gin.Context) {
 
 // SendMedia envia uma mensagem de mídia (imagem, vídeo, documento, etc.)
 func (h *MessageHandler) SendMedia(c *gin.Context) {
-	// Vincular dados do formulário
 	var req MediaMessageRequest
-	if err := c.ShouldBind(&req); err != nil {
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
 		return
 	}
 
-	// Receber arquivo
-	file, err := c.FormFile("file")
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Arquivo não fornecido", "details": err.Error()})
+	// Ensure media URL is provided
+	if req.MediaURL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "É necessário fornecer media_url"})
 		return
-	}
-
-	// Verificar tipo de mídia
-	mediaType := req.MediaType
-	if mediaType == "" {
-		// Tentar deduzir do Content-Type
-		mediaType = file.Header.Get("Content-Type")
 	}
 
 	// Verificar se a sessão existe
@@ -153,20 +145,8 @@ func (h *MessageHandler) SendMedia(c *gin.Context) {
 		return
 	}
 
-	// Salvar arquivo temporariamente
-	tempPath := filepath.Join(os.TempDir(), file.Filename)
-	if err := saveUploadedFile(file, tempPath); err != nil {
-		logger.Error("Falha ao salvar arquivo", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao salvar arquivo", "details": err.Error()})
-		return
-	}
-
-	// Enviar mídia
-	msgID, err := h.sessionManager.SendMedia(req.UserID, req.To, tempPath, mediaType, req.Caption)
-
-	// Remover arquivo temporário
-	os.Remove(tempPath)
-
+	// Enviar mídia usando a URL
+	msgID, err := h.sessionManager.SendMedia(req.UserID, req.To, req.MediaURL, req.MediaType, req.Caption)
 	if err != nil {
 		logger.Error("Falha ao enviar mídia", "error", err, "user_id", req.UserID, "to", req.To)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao enviar mídia", "details": err.Error()})
