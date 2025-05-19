@@ -49,29 +49,71 @@ func NewSessionManager(sqlStore *storage.SQLStore) *SessionManager {
 	}
 }
 
-// InitSessions loads all existing sessions from the database
+// InitSessions carrega e reconecta todas as sessões existentes do banco de dados
 func (sm *SessionManager) InitSessions(ctx context.Context) error {
-	// Get all userID -> deviceJID mappings
+	// Obter todos os mapeamentos userID -> deviceJID
 	mappings, err := sm.sqlStore.GetAllUserDeviceMappings()
 	if err != nil {
-		return fmt.Errorf("failed to load userID mappings: %w", err)
+		return fmt.Errorf("falha ao carregar mapeamentos de userID: %w", err)
 	}
 
-	logger.Info("Loading existing sessions", "count", len(mappings))
+	logger.Info("Carregando sessões existentes", "count", len(mappings))
 
+	// Configurar nome do dispositivo padrão (antes de criar qualquer cliente)
+	store.SetOSInfo("Ubuntu", [3]uint32{1, 0, 0})
+
+	// Criar e conectar cada sessão
 	for _, mapping := range mappings {
-		logger.Debug("Restoring session", "user_id", mapping.UserID, "device_jid", mapping.DeviceJID)
+		logger.Info("Restaurando sessão", "user_id", mapping.UserID, "device_jid", mapping.DeviceJID)
 
-		// Try to create a session for each mapping
+		// Criar a sessão
 		client, err := sm.CreateSession(ctx, mapping.UserID)
 		if err != nil {
-			logger.Error("Failed to restore session", "user_id", mapping.UserID, "error", err)
+			logger.Error("Falha ao criar sessão", "user_id", mapping.UserID, "error", err)
 			continue
 		}
 
-		// Update last active time
-		client.LastActive = time.Now()
+		// Verificar se a sessão foi autenticada
+		if client.WAClient.Store.ID == nil {
+			logger.Warn("Sessão restaurada, mas não está autenticada", "user_id", mapping.UserID)
+			continue
+		}
+
+		// Tentar conectar ao WhatsApp
+		logger.Info("Reconectando sessão", "user_id", mapping.UserID)
+
+		// Definir timeout para conexão
+		_, cancel := context.WithTimeout(ctx, 30*time.Second)
+
+		// Conectar em goroutine separada
+		go func(userID string, cancelFunc context.CancelFunc) {
+			defer cancelFunc()
+
+			err := client.WAClient.Connect()
+			if err != nil {
+				logger.Error("Falha ao conectar sessão restaurada",
+					"user_id", userID,
+					"error", err)
+				return
+			}
+
+			// Aguardar conexão ser estabelecida
+			if client.WAClient.WaitForConnection(20 * time.Second) {
+				// Conexão bem sucedida
+				client.Connected = true
+				client.LastActive = time.Now()
+				logger.Info("Sessão reconectada com sucesso", "user_id", userID)
+			} else {
+				// Timeout ao conectar
+				logger.Warn("Timeout ao tentar reconectar sessão", "user_id", userID)
+			}
+		}(mapping.UserID, cancel)
 	}
+
+	// Aguardar um pouco para que as conexões iniciais possam ser estabelecidas
+	// Isso é opcional, mas pode ajudar a garantir que algumas sessões já estejam conectadas
+	// antes de continuar com a inicialização do serviço
+	time.Sleep(5 * time.Second)
 
 	return nil
 }
@@ -197,40 +239,82 @@ func (sm *SessionManager) Connect(ctx context.Context, userID string) error {
 	return nil
 }
 
-// GetQRChannel returns a QR code channel for authentication
+// GetQRChannel retorna um canal de eventos QR code para autenticação
+// GetQRChannel retorna um canal de eventos QR code para autenticação
 func (sm *SessionManager) GetQRChannel(ctx context.Context, userID string) (<-chan whatsmeow.QRChannelItem, error) {
-	// Get or create session
-	client, exists := sm.GetSession(userID)
+	sm.clientsMutex.Lock()
+	defer sm.clientsMutex.Unlock()
+
+	// Verificar se a sessão existe, caso contrário criar uma nova
+	client, exists := sm.clients[userID]
 	if !exists {
-		var err error
-		client, err = sm.CreateSession(ctx, userID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create session: %w", err)
+		// Criar nova sessão
+		container := sm.sqlStore.GetDBContainer()
+		if container == nil {
+			return nil, fmt.Errorf("database container is nil")
+		}
+
+		// Criar um novo dispositivo
+		deviceStore := container.NewDevice()
+		waClient := whatsmeow.NewClient(deviceStore, sm.logger)
+
+		// Registrar event handler
+		waClient.AddEventHandler(func(evt interface{}) {
+			sm.processEvent(userID, evt)
+		})
+
+		// Criar e armazenar o cliente
+		client = &Client{
+			ID:         userID,
+			WAClient:   waClient,
+			Connected:  false,
+			CreatedAt:  time.Now(),
+			LastActive: time.Now(),
+		}
+		sm.clients[userID] = client
+	} else {
+		// Se o cliente existe, verificar se não está autenticado
+		if client.WAClient.Store.ID != nil {
+			return nil, fmt.Errorf("cliente já está autenticado")
+		}
+
+		// Se está conectado, desconectar primeiro
+		if client.Connected {
+			client.WAClient.Disconnect()
+			client.Connected = false
+			time.Sleep(1 * time.Second) // Pequena pausa para garantir desconexão
 		}
 	}
 
-	// Check if client is already connected
-	if client.WAClient.IsConnected() {
-		return nil, fmt.Errorf("client is already connected")
-	}
-
-	// Check if a valid session already exists
-	if client.WAClient.Store.ID != nil {
-		return nil, fmt.Errorf("session is already authenticated, QR code not needed")
-	}
-
-	// Get QR channel
+	// Obter canal QR
 	qrChan, err := client.WAClient.GetQRChannel(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get QR channel: %w", err)
+		return nil, fmt.Errorf("falha ao obter canal QR: %w", err)
 	}
 
-	// Connect client in a separate goroutine
+	// Iniciar conexão em goroutine
 	go func() {
-		logger.Debug("Attempting to connect client", "user_id", userID)
-		err := client.WAClient.Connect()
-		if err != nil {
-			logger.Error("Failed to connect client", "error", err, "user_id", userID)
+		logger.Info("Iniciando conexão para QR code", "user_id", userID)
+
+		// Tentar conectar com retry em caso de falhas
+		maxRetries := 3
+		for i := 0; i < maxRetries; i++ {
+			err := client.WAClient.Connect()
+			if err == nil {
+				client.Connected = true
+				client.LastActive = time.Now()
+				logger.Info("Cliente conectado com sucesso", "user_id", userID)
+				break
+			}
+
+			logger.Error("Falha ao conectar cliente",
+				"error", err,
+				"user_id", userID,
+				"retry", i+1,
+				"max_retries", maxRetries)
+
+			// Aguardar antes de tentar novamente
+			time.Sleep(2 * time.Second)
 		}
 	}()
 
@@ -275,6 +359,49 @@ func (sm *SessionManager) DisconnectAll() {
 			client.Connected = false
 		}
 	}
+}
+
+// ResetSession reseta uma sessão para permitir nova autenticação via QR code
+func (sm *SessionManager) ResetSession(ctx context.Context, userID string) error {
+	sm.clientsMutex.Lock()
+	defer sm.clientsMutex.Unlock()
+
+	client, exists := sm.clients[userID]
+	if !exists {
+		return fmt.Errorf("sessão não encontrada: %s", userID)
+	}
+
+	// Desconectar se conectado
+	if client.WAClient.IsConnected() {
+		client.WAClient.Disconnect()
+	}
+
+	// Remover mapeamento de dispositivo no banco
+	if err := sm.sqlStore.DeleteUserDeviceMapping(userID); err != nil {
+		logger.Warn("Falha ao remover mapeamento durante reset", "user_id", userID, "error", err)
+	}
+
+	// Criar novo dispositivo e cliente
+	container := sm.sqlStore.GetDBContainer()
+	if container == nil {
+		return fmt.Errorf("database container is nil")
+	}
+
+	deviceStore := container.NewDevice()
+	waClient := whatsmeow.NewClient(deviceStore, sm.logger)
+
+	// Registrar handler de eventos
+	waClient.AddEventHandler(func(evt interface{}) {
+		sm.processEvent(userID, evt)
+	})
+
+	// Substituir o cliente existente
+	client.WAClient = waClient
+	client.Connected = false
+	client.LastActive = time.Now()
+
+	logger.Info("Sessão resetada com sucesso", "user_id", userID)
+	return nil
 }
 
 // Logout logs out and removes a session

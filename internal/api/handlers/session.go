@@ -2,11 +2,15 @@
 package handlers
 
 import (
+	"context"
 	"encoding/base64"
+	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/mdp/qrterminal/v3"
 	"github.com/skip2/go-qrcode"
 
 	"yourproject/internal/services/whatsapp"
@@ -117,34 +121,115 @@ func (h *SessionHandler) GetQRCode(c *gin.Context) {
 		return
 	}
 
-	// Obter código QR
-	qrChan, err := h.sessionManager.GetQRChannel(c.Request.Context(), id)
+	// Verificar se já existe uma sessão e se está autenticada
+	client, exists := h.sessionManager.GetSession(id)
+	if exists && client.WAClient.Store.ID != nil {
+		if !client.Connected {
+			// Sessão autenticada mas desconectada - resetar automaticamente
+			logger.Info("Resetando sessão autenticada mas desconectada", "user_id", id)
+			if err := h.sessionManager.ResetSession(c.Request.Context(), id); err != nil {
+				logger.Error("Falha ao resetar sessão", "error", err, "user_id", id)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao resetar sessão", "details": err.Error()})
+				return
+			}
+		} else {
+			// Sessão autenticada E conectada - não permitir gerar novo QR
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":     "Sessão já está autenticada e conectada",
+				"connected": true,
+			})
+			return
+		}
+	}
+
+	// Criar contexto com timeout mais longo para permitir o escaneamento
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	// Obter canal de QR
+	qrChan, err := h.sessionManager.GetQRChannel(ctx, id)
 	if err != nil {
 		logger.Error("Falha ao obter canal QR", "error", err, "user_id", id)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao gerar QR code", "details": err.Error()})
 		return
 	}
 
-	select {
-	case qrCode := <-qrChan:
-		// Gerar imagem QR
-		qrImg, err := qrcode.Encode(qrCode.Code, qrcode.Medium, 256)
-		if err != nil {
-			logger.Error("Falha ao gerar QR code", "error", err, "user_id", id)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao gerar imagem QR", "details": err.Error()})
+	// Iniciar processamento de stream como SSE (Server-Sent Events)
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("Transfer-Encoding", "chunked")
+
+	// Enviar um evento inicial para confirmar conexão
+	c.SSEvent("status", gin.H{"message": "Aguardando QR code..."})
+	c.Writer.Flush()
+
+	// Função para verificar estado de conexão periodicamente
+	connectionCheckTicker := time.NewTicker(5 * time.Second)
+	defer connectionCheckTicker.Stop()
+
+	// Monitorar o canal do cliente para enviar atualizações
+	for {
+		select {
+		case evt, ok := <-qrChan:
+			if !ok {
+				// Canal fechado
+				c.SSEvent("error", gin.H{"message": "Canal de QR code fechado"})
+				c.Writer.Flush()
+				return
+			}
+
+			logger.Info("Evento QR recebido", "event", evt.Event, "user_id", id)
+
+			if evt.Event == "code" {
+				// Imprimir QR no terminal para debug
+				fmt.Println("\n===== QR CODE para sessão", id, "=====")
+				qrterminal.GenerateHalfBlock(evt.Code, qrterminal.L, os.Stdout)
+				fmt.Println("\nEscaneie o código acima com o seu WhatsApp")
+
+				// Gerar QR para cliente
+				qrImg, err := qrcode.Encode(evt.Code, qrcode.Medium, 256)
+				if err != nil {
+					c.SSEvent("error", gin.H{"message": "Falha ao gerar QR code"})
+					c.Writer.Flush()
+					return
+				}
+
+				// Enviar QR code como evento SSE
+				qrBase64 := base64.StdEncoding.EncodeToString(qrImg)
+				c.SSEvent("qrcode", gin.H{
+					"qrcode": qrBase64,
+					"data":   evt.Code,
+				})
+				c.Writer.Flush()
+			} else if evt.Event == "success" {
+				// Login realizado com sucesso
+				c.SSEvent("success", gin.H{"message": "Login realizado com sucesso"})
+				c.Writer.Flush()
+				return
+			} else {
+				// Outros eventos (timeout, etc)
+				c.SSEvent("status", gin.H{"event": evt.Event})
+				c.Writer.Flush()
+			}
+
+		case <-connectionCheckTicker.C:
+			// Verificar se o cliente está conectado a cada 5 segundos
+			updatedClient, exists := h.sessionManager.GetSession(id)
+			if exists && updatedClient.Connected && updatedClient.WAClient.Store.ID != nil {
+				c.SSEvent("success", gin.H{
+					"message": "Cliente autenticado e conectado",
+				})
+				c.Writer.Flush()
+				return
+			}
+
+		case <-ctx.Done():
+			// Timeout geral
+			c.SSEvent("error", gin.H{"message": "Timeout ao aguardar QR code"})
+			c.Writer.Flush()
 			return
 		}
-
-		// Codificar em base64
-		qrBase64 := base64.StdEncoding.EncodeToString(qrImg)
-
-		c.JSON(http.StatusOK, gin.H{
-			"qrcode": qrBase64,
-			"data":   qrCode.Code,
-		})
-
-	case <-time.After(60 * time.Second):
-		c.JSON(http.StatusRequestTimeout, gin.H{"error": "Timeout ao gerar QR code"})
 	}
 }
 
