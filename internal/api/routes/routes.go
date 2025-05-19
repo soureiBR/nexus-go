@@ -69,14 +69,14 @@ func SetupRoutes(
 	// Rotas de newsletter
 	newsletter := v1.Group("/newsletter")
 	{
-		newsletter.POST("/create", newsletterHandler.CreateNewsletter)
-		newsletter.GET("/:id", newsletterHandler.GetNewsletter)
-		newsletter.GET("/list", newsletterHandler.ListNewsletters)
-		newsletter.POST("/schedule", newsletterHandler.ScheduleNewsletter)
-		newsletter.POST("/send", newsletterHandler.SendNewsletter)
-		newsletter.POST("/cancel", newsletterHandler.CancelNewsletter)
-		newsletter.DELETE("/:id", newsletterHandler.DeleteNewsletter)
-		newsletter.GET("/:id/reports", newsletterHandler.GetDeliveryReports)
+		newsletter.POST("/create", newsletterHandler.CreateChannel)
+		newsletter.POST("/info", newsletterHandler.GetChannelInfo)
+		newsletter.POST("/info-invite", newsletterHandler.GetChannelWithInvite)
+		newsletter.POST("/list", newsletterHandler.ListMyChannels)
+		newsletter.POST("/follow", newsletterHandler.FollowChannel)
+		newsletter.POST("/unfollow", newsletterHandler.UnfollowChannel)
+		newsletter.POST("/mute", newsletterHandler.MuteChannel)
+		newsletter.POST("/unmute", newsletterHandler.UnmuteChannel)
 	}
 
 	// Rotas de comunidade
@@ -94,7 +94,6 @@ func SetupRoutes(
 		community.POST("/join", communityHandler.JoinCommunityWithLink)
 		community.GET("/invite-link", communityHandler.GetCommunityInviteLink)
 		community.POST("/invite-link/revoke", communityHandler.RevokeCommunityInviteLink)
-		community.POST("/announcement", communityHandler.SendCommunityAnnouncement)
 	}
 
 	// Configuração de webhook

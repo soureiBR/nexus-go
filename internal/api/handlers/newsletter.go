@@ -2,224 +2,243 @@
 package handlers
 
 import (
+	"io"
 	"net/http"
-	"time"
-	
+
 	"github.com/gin-gonic/gin"
-	
+	"go.mau.fi/whatsmeow/types"
+
 	"yourproject/internal/services/whatsapp"
 	"yourproject/pkg/logger"
 )
 
-// NewsletterHandler gerencia endpoints para operações de newsletter
+// NewsletterHandler gerencia endpoints para operações de canais do WhatsApp
 type NewsletterHandler struct {
-	newsletterService *newsletter.NewsletterService
+	newsletterService *whatsapp.NewsletterService
 }
 
 // NewNewsletterHandler cria um novo handler de newsletter
-func NewNewsletterHandler(ns *newsletter.NewsletterService) *NewsletterHandler {
+func NewNewsletterHandler(ns *whatsapp.NewsletterService) *NewsletterHandler {
 	return &NewsletterHandler{
 		newsletterService: ns,
 	}
 }
 
-// CreateNewsletterRequest representa a requisição para criar um newsletter
-type CreateNewsletterRequest struct {
-	Title       string                 `json:"title" binding:"required"`
-	Content     string                 `json:"content" binding:"required"`
-	MediaURL    string                 `json:"media_url,omitempty"`
-	MediaType   string                 `json:"media_type,omitempty"`
-	Buttons     []whatsapp.ButtonData  `json:"buttons,omitempty"`
-	Recipients  []string               `json:"recipients" binding:"required,min=1"`
-	CreatedBy   string                 `json:"created_by" binding:"required"`
-	SessionID   string                 `json:"session_id" binding:"required"`
+// CreateChannelRequest representa a requisição para criar um canal
+type CreateChannelRequest struct {
+	UserID      string `json:"user_id" binding:"required"`
+	Name        string `json:"name" binding:"required"`
+	Description string `json:"description"`
 }
 
-// ScheduleNewsletterRequest representa a requisição para agendar um newsletter
-type ScheduleNewsletterRequest struct {
-	ID             string `json:"id" binding:"required"`
-	ScheduledFor   string `json:"scheduled_for" binding:"required"`
+// ChannelJIDRequest representa uma requisição que identifica um canal por JID
+type ChannelJIDRequest struct {
+	UserID string `json:"user_id" binding:"required"`
+	JID    string `json:"jid" binding:"required"`
 }
 
-// SendNewsletterRequest representa a requisição para enviar um newsletter
-type SendNewsletterRequest struct {
-	ID string `json:"id" binding:"required"`
+// ChannelInviteRequest representa uma requisição para obter canal por convite
+type ChannelInviteRequest struct {
+	UserID     string `json:"user_id" binding:"required"`
+	InviteLink string `json:"invite_link" binding:"required"`
 }
 
-// CancelNewsletterRequest representa a requisição para cancelar um newsletter
-type CancelNewsletterRequest struct {
-	ID string `json:"id" binding:"required"`
+// ListChannelsRequest representa uma requisição para listar canais
+type ListChannelsRequest struct {
+	UserID string `json:"user_id" binding:"required"`
 }
 
-// DeleteNewsletterRequest representa a requisição para excluir um newsletter
-type DeleteNewsletterRequest struct {
-	ID string `json:"id" binding:"required"`
-}
-
-// GetNewsletterRequest representa a requisição para obter um newsletter
-type GetNewsletterRequest struct {
-	ID string `json:"id" binding:"required"`
-}
-
-// CreateNewsletter cria um novo newsletter
-func (h *NewsletterHandler) CreateNewsletter(c *gin.Context) {
-	var req CreateNewsletterRequest
+// CreateChannel cria um novo canal do WhatsApp
+func (h *NewsletterHandler) CreateChannel(c *gin.Context) {
+	var req CreateChannelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
 		return
 	}
-	
-	// Criar newsletter
-	result, err := h.newsletterService.CreateNewsletter(
-		req.Title,
-		req.Content,
-		req.MediaURL,
-		req.MediaType,
-		req.Buttons,
-		req.Recipients,
-		req.CreatedBy,
-		req.SessionID,
-	)
-	
+
+	// Verificar se há uma imagem enviada
+	var picture []byte
+	file, _, err := c.Request.FormFile("picture")
+	if err == nil {
+		defer file.Close()
+		picture, _ = io.ReadAll(file)
+	}
+
+	// Criar canal
+	metadata, err := h.newsletterService.CreateChannel(c.Request.Context(), req.UserID, req.Name, req.Description, picture)
 	if err != nil {
-		logger.Error("Falha ao criar newsletter", "error", err, "created_by", req.CreatedBy)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao criar newsletter", "details": err.Error()})
+		logger.Error("Falha ao criar canal", "error", err, "user_id", req.UserID)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao criar canal", "details": err.Error()})
 		return
 	}
-	
-	c.JSON(http.StatusCreated, result)
+
+	c.JSON(http.StatusCreated, metadata)
 }
 
-// GetNewsletter obtém um newsletter pelo ID
-func (h *NewsletterHandler) GetNewsletter(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do newsletter é obrigatório"})
-		return
-	}
-	
-	// Obter newsletter
-	result, err := h.newsletterService.GetNewsletter(id)
-	if err != nil {
-		logger.Error("Falha ao obter newsletter", "error", err, "id", id)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao obter newsletter", "details": err.Error()})
-		return
-	}
-	
-	c.JSON(http.StatusOK, result)
-}
-
-// ListNewsletters lista todos os newsletters
-func (h *NewsletterHandler) ListNewsletters(c *gin.Context) {
-	// Listar newsletters
-	results := h.newsletterService.ListNewsletters()
-	c.JSON(http.StatusOK, results)
-}
-
-// ScheduleNewsletter agenda um newsletter para envio
-func (h *NewsletterHandler) ScheduleNewsletter(c *gin.Context) {
-	var req ScheduleNewsletterRequest
+// GetChannelInfo obtém informações sobre um canal específico
+func (h *NewsletterHandler) GetChannelInfo(c *gin.Context) {
+	var req ChannelJIDRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
 		return
 	}
-	
-	// Parsear data agendada
-	scheduledTime, err := time.Parse(time.RFC3339, req.ScheduledFor)
+
+	// Converter JID para o formato correto
+	jid, err := types.ParseJID(req.JID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Formato de data inválido. Use o formato RFC3339", "details": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "JID inválido", "details": err.Error()})
 		return
 	}
-	
-	// Verificar se a data está no futuro
-	if scheduledTime.Before(time.Now()) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "A data agendada deve estar no futuro"})
-		return
-	}
-	
-	// Agendar newsletter
-	err = h.newsletterService.ScheduleNewsletter(req.ID, scheduledTime)
+
+	// Obter informações do canal
+	metadata, err := h.newsletterService.GetChannelInfo(c.Request.Context(), req.UserID, jid)
 	if err != nil {
-		logger.Error("Falha ao agendar newsletter", "error", err, "id", req.ID)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao agendar newsletter", "details": err.Error()})
+		logger.Error("Falha ao obter informações do canal", "error", err, "user_id", req.UserID, "jid", req.JID)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao obter informações do canal", "details": err.Error()})
 		return
 	}
-	
-	c.JSON(http.StatusOK, gin.H{"message": "Newsletter agendado com sucesso", "scheduled_for": scheduledTime})
+
+	c.JSON(http.StatusOK, metadata)
 }
 
-// SendNewsletter envia um newsletter imediatamente
-func (h *NewsletterHandler) SendNewsletter(c *gin.Context) {
-	var req SendNewsletterRequest
+// GetChannelWithInvite obtém informações do canal usando um link de convite
+func (h *NewsletterHandler) GetChannelWithInvite(c *gin.Context) {
+	var req ChannelInviteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
 		return
 	}
-	
-	// Enviar newsletter
-	err := h.newsletterService.SendNewsletter(req.ID)
+
+	// Obter informações do canal por convite
+	metadata, err := h.newsletterService.GetChannelWithInvite(c.Request.Context(), req.UserID, req.InviteLink)
 	if err != nil {
-		logger.Error("Falha ao enviar newsletter", "error", err, "id", req.ID)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao enviar newsletter", "details": err.Error()})
+		logger.Error("Falha ao obter informações do canal por convite", "error", err, "user_id", req.UserID)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao obter informações do canal por convite", "details": err.Error()})
 		return
 	}
-	
-	c.JSON(http.StatusOK, gin.H{"message": "Envio de newsletter iniciado"})
+
+	c.JSON(http.StatusOK, metadata)
 }
 
-// CancelNewsletter cancela um newsletter agendado
-func (h *NewsletterHandler) CancelNewsletter(c *gin.Context) {
-	var req CancelNewsletterRequest
+// ListMyChannels lista todos os canais que o usuário está inscrito
+func (h *NewsletterHandler) ListMyChannels(c *gin.Context) {
+	var req ListChannelsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
 		return
 	}
-	
-	// Cancelar newsletter
-	err := h.newsletterService.CancelNewsletter(req.ID)
+
+	// Listar canais inscritos
+	channels, err := h.newsletterService.ListMyChannels(c.Request.Context(), req.UserID)
 	if err != nil {
-		logger.Error("Falha ao cancelar newsletter", "error", err, "id", req.ID)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao cancelar newsletter", "details": err.Error()})
+		logger.Error("Falha ao listar canais inscritos", "error", err, "user_id", req.UserID)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao listar canais inscritos", "details": err.Error()})
 		return
 	}
-	
-	c.JSON(http.StatusOK, gin.H{"message": "Newsletter cancelado com sucesso"})
+
+	c.JSON(http.StatusOK, channels)
 }
 
-// DeleteNewsletter exclui um newsletter
-func (h *NewsletterHandler) DeleteNewsletter(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do newsletter é obrigatório"})
+// FollowChannel inscreve o usuário em um canal
+func (h *NewsletterHandler) FollowChannel(c *gin.Context) {
+	var req ChannelJIDRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
 		return
 	}
-	
-	// Excluir newsletter
-	err := h.newsletterService.DeleteNewsletter(id)
+
+	// Converter JID para o formato correto
+	jid, err := types.ParseJID(req.JID)
 	if err != nil {
-		logger.Error("Falha ao excluir newsletter", "error", err, "id", id)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao excluir newsletter", "details": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "JID inválido", "details": err.Error()})
 		return
 	}
-	
-	c.JSON(http.StatusOK, gin.H{"message": "Newsletter excluído com sucesso"})
+
+	// Seguir canal
+	err = h.newsletterService.FollowChannel(c.Request.Context(), req.UserID, jid)
+	if err != nil {
+		logger.Error("Falha ao seguir canal", "error", err, "user_id", req.UserID, "jid", req.JID)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao seguir canal", "details": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Canal seguido com sucesso"})
 }
 
-// GetDeliveryReports obtém relatórios de entrega de um newsletter
-func (h *NewsletterHandler) GetDeliveryReports(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do newsletter é obrigatório"})
+// UnfollowChannel cancela a inscrição do usuário em um canal
+func (h *NewsletterHandler) UnfollowChannel(c *gin.Context) {
+	var req ChannelJIDRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
 		return
 	}
-	
-	// Obter relatórios de entrega
-	reports, err := h.newsletterService.GetDeliveryReports(id)
+
+	// Converter JID para o formato correto
+	jid, err := types.ParseJID(req.JID)
 	if err != nil {
-		logger.Error("Falha ao obter relatórios de entrega", "error", err, "id", id)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao obter relatórios de entrega", "details": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "JID inválido", "details": err.Error()})
 		return
 	}
-	
-	c.JSON(http.StatusOK, reports)
+
+	// Deixar de seguir canal
+	err = h.newsletterService.UnfollowChannel(c.Request.Context(), req.UserID, jid)
+	if err != nil {
+		logger.Error("Falha ao deixar de seguir canal", "error", err, "user_id", req.UserID, "jid", req.JID)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao deixar de seguir canal", "details": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Inscrição no canal cancelada com sucesso"})
+}
+
+// MuteChannel silencia notificações de um canal
+func (h *NewsletterHandler) MuteChannel(c *gin.Context) {
+	var req ChannelJIDRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
+		return
+	}
+
+	// Converter JID para o formato correto
+	jid, err := types.ParseJID(req.JID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "JID inválido", "details": err.Error()})
+		return
+	}
+
+	// Silenciar canal
+	err = h.newsletterService.MuteChannel(c.Request.Context(), req.UserID, jid)
+	if err != nil {
+		logger.Error("Falha ao silenciar canal", "error", err, "user_id", req.UserID, "jid", req.JID)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao silenciar canal", "details": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Canal silenciado com sucesso"})
+}
+
+// UnmuteChannel reativa notificações de um canal
+func (h *NewsletterHandler) UnmuteChannel(c *gin.Context) {
+	var req ChannelJIDRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
+		return
+	}
+
+	// Converter JID para o formato correto
+	jid, err := types.ParseJID(req.JID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "JID inválido", "details": err.Error()})
+		return
+	}
+
+	// Reativar notificações do canal
+	err = h.newsletterService.UnmuteChannel(c.Request.Context(), req.UserID, jid)
+	if err != nil {
+		logger.Error("Falha ao reativar notificações do canal", "error", err, "user_id", req.UserID, "jid", req.JID)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao reativar notificações do canal", "details": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Notificações do canal reativadas com sucesso"})
 }
