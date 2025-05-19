@@ -55,6 +55,9 @@ func main() {
 		log.Printf("Warning: Failed to load all sessions: %v", err)
 	}
 
+	// Initialize newsletter service
+	newsLetterService := whatsapp.NewNewsletterService(sessionManager)
+
 	// Configure webhook
 	webhookService := webhook.NewDispatcher(cfg.WebhookURL)
 
@@ -78,6 +81,9 @@ func main() {
 	// Configure HTTP handlers
 	sessionHandler := handlers.NewSessionHandler(sessionManager)
 	messageHandler := handlers.NewMessageHandler(sessionManager)
+	groupHandler := handlers.NewGroupHandler(sessionManager)
+	communityHandler := handlers.NewCommunityHandler(sessionManager)
+	newsletterHandler := handlers.NewNewsletterHandler(newsLetterService)
 	webhookHandler := handlers.NewWebhookHandler(webhookService)
 
 	// Configure authentication middleware
@@ -85,7 +91,7 @@ func main() {
 
 	// Configure HTTP server
 	r := gin.Default()
-	routes.SetupRoutes(r, sessionHandler, messageHandler, webhookHandler, authMiddleware)
+	routes.SetupRoutes(r, sessionHandler, messageHandler, webhookHandler, groupHandler, newsletterHandler, communityHandler, authMiddleware)
 
 	// Start server with graceful shutdown
 	srv := &http.Server{

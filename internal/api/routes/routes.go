@@ -18,7 +18,7 @@ func SetupRoutes(
 	groupHandler *handlers.GroupHandler,
 	newsletterHandler *handlers.NewsletterHandler,
 	communityHandler *handlers.CommunityHandler,
-	authMiddleware middlewares.AuthMiddleware,
+	authMiddleware *middlewares.AuthMiddleware,
 ) {
 	// Middleware global
 	r.Use(middlewares.Logger())
