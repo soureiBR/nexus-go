@@ -10,6 +10,7 @@ import (
 	"yourproject/pkg/logger"
 
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/proto/waCompanionReg"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 	waLog "go.mau.fi/whatsmeow/util/log"
@@ -60,7 +61,8 @@ func (sm *SessionManager) InitSessions(ctx context.Context) error {
 	logger.Info("Carregando sessões existentes", "count", len(mappings))
 
 	// Configurar nome do dispositivo padrão (antes de criar qualquer cliente)
-	store.SetOSInfo("Ubuntu", [3]uint32{1, 0, 0})
+	store.SetOSInfo("Linux", store.GetWAVersion())
+	store.DeviceProps.PlatformType = waCompanionReg.DeviceProps_CHROME.Enum()
 
 	// Criar e conectar cada sessão
 	for _, mapping := range mappings {
@@ -430,6 +432,51 @@ func (sm *SessionManager) Logout(ctx context.Context, userID string) error {
 	}
 
 	logger.Debug("Session logged out", "user_id", userID)
+
+	return nil
+}
+
+// handleDeviceLogout limpa os dados da sessão quando um dispositivo é desconectado
+func (sm *SessionManager) handleDeviceLogout(userID string) error {
+	sm.clientsMutex.Lock()
+	defer sm.clientsMutex.Unlock()
+
+	client, exists := sm.clients[userID]
+	if !exists {
+		return fmt.Errorf("sessão não encontrada: %s", userID)
+	}
+
+	// Desconectar cliente se conectado
+	if client.WAClient.IsConnected() {
+		client.WAClient.Disconnect()
+	}
+
+	// Remover mapeamento do banco de dados
+	if err := sm.sqlStore.DeleteUserDeviceMapping(userID); err != nil {
+		logger.Warn("Falha ao remover mapeamento de dispositivo", "user_id", userID, "error", err)
+	}
+
+	// Obter container do banco de dados
+	container := sm.sqlStore.GetDBContainer()
+	if container == nil {
+		return fmt.Errorf("container de banco de dados é nulo")
+	}
+
+	// Criar um novo dispositivo
+	deviceStore := container.NewDevice()
+
+	// Criar um novo cliente
+	waClient := whatsmeow.NewClient(deviceStore, sm.logger)
+	waClient.AddEventHandler(func(evt interface{}) {
+		sm.processEvent(userID, evt)
+	})
+
+	// Atualizar o cliente
+	client.WAClient = waClient
+	client.Connected = false
+	client.LastActive = time.Now()
+
+	logger.Info("Sessão completamente resetada após logout", "user_id", userID)
 
 	return nil
 }

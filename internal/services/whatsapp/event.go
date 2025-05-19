@@ -2,6 +2,7 @@
 package whatsapp
 
 import (
+	"fmt"
 	"time"
 	"yourproject/pkg/logger"
 
@@ -22,52 +23,72 @@ func (sm *SessionManager) RegisterEventHandler(eventType string, handler EventHa
 
 // processEvent processes WhatsApp events
 func (sm *SessionManager) processEvent(userID string, evt interface{}) {
-	// Your event processing logic here
-	// For example:
+	// Determine event type
+	var eventType string
 
-	// Update client in cache
+	// Atualizar última atividade do cliente
 	sm.clientsMutex.Lock()
 	if client, exists := sm.clients[userID]; exists {
 		client.LastActive = time.Now()
 	}
 	sm.clientsMutex.Unlock()
 
-	// Determine event type
-	var eventType string
-	switch evt.(type) {
+	switch typedEvt := evt.(type) {
 	case *events.Message:
 		eventType = "message"
+
 	case *events.Connected:
 		eventType = "connected"
 
-		// When the device is authenticated, save the mapping
+		// Quando o dispositivo é autenticado, salvar o mapeamento
 		client, exists := sm.GetSession(userID)
 		if exists && client.WAClient.Store.ID != nil {
 			deviceJID := client.WAClient.Store.ID.String()
 			if err := sm.sqlStore.SaveUserDeviceMapping(userID, deviceJID); err != nil {
-				logger.Error("Failed to save mapping", "user_id", userID, "device_jid", deviceJID, "error", err)
+				logger.Error("Falha ao salvar mapeamento", "user_id", userID, "device_jid", deviceJID, "error", err)
 			} else {
-				logger.Info("Mapping saved", "user_id", userID, "device_jid", deviceJID)
+				logger.Info("Mapeamento salvo", "user_id", userID, "device_jid", deviceJID)
 			}
+
+			// Atualizar estado conectado
+			sm.clientsMutex.Lock()
+			client.Connected = true
+			sm.clientsMutex.Unlock()
 		}
 
 	case *events.Disconnected:
 		eventType = "disconnected"
+
+		// Atualizar estado de conexão
+		sm.clientsMutex.Lock()
+		if client, exists := sm.clients[userID]; exists {
+			client.Connected = false
+		}
+		sm.clientsMutex.Unlock()
+
+		logger.Info("Cliente desconectado", "user_id", userID, "reason")
+
 	case *events.LoggedOut:
 		eventType = "logged_out"
 
-		// When device is logged out, remove the mapping
-		if err := sm.sqlStore.DeleteUserDeviceMapping(userID); err != nil {
-			logger.Error("Failed to remove mapping after logout", "user_id", userID, "error", err)
+		logger.Info("Evento de logout recebido", "user_id", userID, "reason", typedEvt.Reason)
+
+		// Executar limpeza completa da sessão
+		if err := sm.handleDeviceLogout(userID); err != nil {
+			logger.Error("Falha ao limpar sessão após logout", "user_id", userID, "error", err)
 		}
 
 	case *events.QR:
 		eventType = "qr"
+
 	default:
 		eventType = "unknown"
+		logger.Debug("Evento desconhecido recebido",
+			"user_id", userID,
+			"event_type", fmt.Sprintf("%T", evt))
 	}
 
-	// Call handlers
+	// Chamar handlers
 	sm.clientsMutex.RLock()
 	handlers, exists := sm.eventHandlers[eventType]
 	sm.clientsMutex.RUnlock()
@@ -75,7 +96,7 @@ func (sm *SessionManager) processEvent(userID string, evt interface{}) {
 	if exists {
 		for _, handler := range handlers {
 			if err := handler(userID, evt); err != nil {
-				sm.logger.Errorf("Error processing event %s: %v", eventType, err)
+				sm.logger.Errorf("Erro ao processar evento %s: %v", eventType, err)
 			}
 		}
 	}
