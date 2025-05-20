@@ -23,47 +23,35 @@ type CommunityInfo struct {
 }
 
 // CreateCommunity cria uma nova comunidade no WhatsApp
-func (sm *SessionManager) CreateCommunity(userID, name string, participants []string) (*types.GroupInfo, error) {
+func (sm *SessionManager) CreateCommunity(userID, name, description string) (*types.GroupInfo, error) {
 	client, exists := sm.GetSession(userID)
 	if !exists {
 		return nil, fmt.Errorf("sessão não encontrada: %s", userID)
 	}
 
-	// Converter strings de participantes para JIDs
-	var jids []types.JID
-	for _, participant := range participants {
-		jid, err := types.ParseJID(participant)
-		if err != nil {
-			return nil, fmt.Errorf("JID inválido para participante %s: %w", participant, err)
-		}
-		jids = append(jids, jid)
-	}
-
-	// Criar a requisição com IsParent definido como true para fazer uma comunidade
+	// Create the community first
 	req := whatsmeow.ReqCreateGroup{
 		Name:         name,
-		Participants: jids,
+		Participants: []types.JID{}, // Empty participants list
 		GroupParent: types.GroupParent{
-			IsParent: true,
-			// Modo de aprovação padrão para grupos de comunidade
-			DefaultMembershipApprovalMode: "request_required", // Opções: "request_required" ou "no_approval"
+			IsParent:                      true,
+			DefaultMembershipApprovalMode: "request_required",
 		},
 	}
 
-	// Usar o método CreateGroup para criar a comunidade
 	groupInfo, err := client.WAClient.CreateGroup(req)
 	if err != nil {
 		return nil, fmt.Errorf("falha ao criar comunidade: %w", err)
 	}
 
-	// Atualizar última atividade
-	client.LastActive = time.Now()
+	// Set the description separately
+	err = client.WAClient.SetGroupTopic(groupInfo.JID, "", "", description)
+	if err != nil {
+		return nil, fmt.Errorf("falha ao definir descrição: %w", err)
+	}
 
-	// Log
-	logger.Debug("Comunidade criada com sucesso",
-		"user_id", userID,
-		"name", name,
-		"jid", groupInfo.JID.String())
+	// Update last active time
+	client.LastActive = time.Now()
 
 	return groupInfo, nil
 }

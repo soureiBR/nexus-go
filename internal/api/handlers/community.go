@@ -24,10 +24,9 @@ func NewCommunityHandler(sm *whatsapp.SessionManager) *CommunityHandler {
 
 // CreateCommunityRequest representa a requisição para criar uma comunidade
 type CreateCommunityRequest struct {
-	UserID       string   `json:"user_id" binding:"required"`
-	Name         string   `json:"name" binding:"required"`
-	Description  string   `json:"description"`
-	Participants []string `json:"participants" binding:"required,min=1"`
+	UserID      string `json:"user_id" binding:"required"`
+	Name        string `json:"name" binding:"required"`
+	Description string `json:"description"`
 }
 
 // UpdateCommunityNameRequest representa a requisição para atualizar nome da comunidade
@@ -112,7 +111,7 @@ func (h *CommunityHandler) CreateCommunity(c *gin.Context) {
 	}
 
 	// Criar comunidade
-	community, err := h.sessionManager.CreateCommunity(req.UserID, req.Name, req.Participants)
+	community, err := h.sessionManager.CreateCommunity(req.UserID, req.Name, req.Description)
 	if err != nil {
 		logger.Error("Falha ao criar comunidade", "error", err, "user_id", req.UserID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao criar comunidade", "details": err.Error()})
