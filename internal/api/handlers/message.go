@@ -20,7 +20,6 @@ type TextMessageRequest struct {
 }
 
 type MediaMessageRequest struct {
-	UserID    string `json:"user_id" binding:"required"`
 	To        string `json:"to" binding:"required"`
 	Caption   string `json:"caption"`
 	MediaURL  string `json:"media_url" binding:"required"`
@@ -28,7 +27,6 @@ type MediaMessageRequest struct {
 }
 
 type ButtonMessageRequest struct {
-	UserID  string                `json:"user_id" binding:"required"`
 	To      string                `json:"to" binding:"required"`
 	Text    string                `json:"text" binding:"required"`
 	Footer  string                `json:"footer"`
@@ -36,7 +34,6 @@ type ButtonMessageRequest struct {
 }
 
 type ListMessageRequest struct {
-	UserID     string             `json:"user_id" binding:"required"`
 	To         string             `json:"to" binding:"required"`
 	Text       string             `json:"text" binding:"required"`
 	Footer     string             `json:"footer"`
@@ -100,6 +97,14 @@ func (h *MessageHandler) SendText(c *gin.Context) {
 
 // SendMedia envia uma mensagem de mídia (imagem, vídeo, documento, etc.)
 func (h *MessageHandler) SendMedia(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
+		return
+	}
+
+	userIDStr := userID.(string)
+
 	var req MediaMessageRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
@@ -113,7 +118,7 @@ func (h *MessageHandler) SendMedia(c *gin.Context) {
 	}
 
 	// Verificar se a sessão existe
-	client, exists := h.sessionManager.GetSession(req.UserID)
+	client, exists := h.sessionManager.GetSession(userIDStr)
 	if !exists {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Sessão não encontrada"})
 		return
@@ -126,9 +131,9 @@ func (h *MessageHandler) SendMedia(c *gin.Context) {
 	}
 
 	// Enviar mídia usando a URL
-	msgID, err := h.sessionManager.SendMedia(req.UserID, req.To, req.MediaURL, req.MediaType, req.Caption)
+	msgID, err := h.sessionManager.SendMedia(userIDStr, req.To, req.MediaURL, req.MediaType, req.Caption)
 	if err != nil {
-		logger.Error("Falha ao enviar mídia", "error", err, "user_id", req.UserID, "to", req.To)
+		logger.Error("Falha ao enviar mídia", "error", err, "user_id", userIDStr, "to", req.To)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao enviar mídia", "details": err.Error()})
 		return
 	}
@@ -141,6 +146,14 @@ func (h *MessageHandler) SendMedia(c *gin.Context) {
 
 // SendButtons envia uma mensagem com botões
 func (h *MessageHandler) SendButtons(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
+		return
+	}
+
+	userIDStr := userID.(string)
+
 	var req ButtonMessageRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
@@ -148,7 +161,7 @@ func (h *MessageHandler) SendButtons(c *gin.Context) {
 	}
 
 	// Verificar se a sessão existe
-	client, exists := h.sessionManager.GetSession(req.UserID)
+	client, exists := h.sessionManager.GetSession(userIDStr)
 	if !exists {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Sessão não encontrada"})
 		return
@@ -161,9 +174,9 @@ func (h *MessageHandler) SendButtons(c *gin.Context) {
 	}
 
 	// Enviar mensagem com botões
-	msgID, err := h.sessionManager.SendButtons(req.UserID, req.To, req.Text, req.Footer, req.Buttons)
+	msgID, err := h.sessionManager.SendButtons(userIDStr, req.To, req.Text, req.Footer, req.Buttons)
 	if err != nil {
-		logger.Error("Falha ao enviar mensagem com botões", "error", err, "user_id", req.UserID, "to", req.To)
+		logger.Error("Falha ao enviar mensagem com botões", "error", err, "user_id", userIDStr, "to", req.To)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao enviar mensagem com botões", "details": err.Error()})
 		return
 	}
@@ -176,6 +189,14 @@ func (h *MessageHandler) SendButtons(c *gin.Context) {
 
 // SendList envia uma mensagem com lista
 func (h *MessageHandler) SendList(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
+		return
+	}
+
+	userIDStr := userID.(string)
+
 	var req ListMessageRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
@@ -183,7 +204,7 @@ func (h *MessageHandler) SendList(c *gin.Context) {
 	}
 
 	// Verificar se a sessão existe
-	client, exists := h.sessionManager.GetSession(req.UserID)
+	client, exists := h.sessionManager.GetSession(userIDStr)
 	if !exists {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Sessão não encontrada"})
 		return
@@ -196,9 +217,9 @@ func (h *MessageHandler) SendList(c *gin.Context) {
 	}
 
 	// Enviar mensagem com lista
-	msgID, err := h.sessionManager.SendList(req.UserID, req.To, req.Text, req.Footer, req.ButtonText, req.Sections)
+	msgID, err := h.sessionManager.SendList(userIDStr, req.To, req.Text, req.Footer, req.ButtonText, req.Sections)
 	if err != nil {
-		logger.Error("Falha ao enviar mensagem com lista", "error", err, "user_id", req.UserID, "to", req.To)
+		logger.Error("Falha ao enviar mensagem com lista", "error", err, "user_id", userIDStr, "to", req.To)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao enviar mensagem com lista", "details": err.Error()})
 		return
 	}
@@ -211,6 +232,7 @@ func (h *MessageHandler) SendList(c *gin.Context) {
 
 // SendTemplate envia uma mensagem de template
 func (h *MessageHandler) SendTemplate(c *gin.Context) {
+
 	// Implementação semelhante às anteriores para envio de templates
 	c.JSON(http.StatusNotImplemented, gin.H{"error": "Funcionalidade em desenvolvimento"})
 }

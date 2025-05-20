@@ -45,6 +45,14 @@ func NewSessionHandler(sm *whatsapp.SessionManager) *SessionHandler {
 
 // CreateSession cria uma nova sessão de WhatsApp
 func (h *SessionHandler) CreateSession(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
+		return
+	}
+
+	userIDStr := userID.(string)
+
 	var req CreateSessionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
@@ -52,9 +60,9 @@ func (h *SessionHandler) CreateSession(c *gin.Context) {
 	}
 
 	// Criar sessão
-	client, err := h.sessionManager.CreateSession(c.Request.Context(), req.UserID)
+	client, err := h.sessionManager.CreateSession(c.Request.Context(), userIDStr)
 	if err != nil {
-		logger.Error("Falha ao criar sessão", "error", err, "user_id", req.UserID)
+		logger.Error("Falha ao criar sessão", "error", err, "user_id", userIDStr)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao criar sessão", "details": err.Error()})
 		return
 	}
@@ -66,7 +74,7 @@ func (h *SessionHandler) CreateSession(c *gin.Context) {
 	}
 
 	resp := SessionResponse{
-		ID:        req.UserID,
+		ID:        userIDStr,
 		Status:    status,
 		Connected: client.Connected,
 		CreatedAt: client.CreatedAt.Format(time.RFC3339),
@@ -81,13 +89,15 @@ func (h *SessionHandler) CreateSession(c *gin.Context) {
 
 // GetSession retorna informações sobre uma sessão existente
 func (h *SessionHandler) GetSession(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "ID da sessão é obrigatório"})
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
 		return
 	}
 
-	client, exists := h.sessionManager.GetSession(id)
+	userIDStr := userID.(string)
+
+	client, exists := h.sessionManager.GetSession(userIDStr)
 	if !exists {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Sessão não encontrada"})
 		return
@@ -100,7 +110,7 @@ func (h *SessionHandler) GetSession(c *gin.Context) {
 	}
 
 	resp := SessionResponse{
-		ID:        id,
+		ID:        userIDStr,
 		Status:    status,
 		Connected: client.Connected,
 		CreatedAt: client.CreatedAt.Format(time.RFC3339),
@@ -115,20 +125,22 @@ func (h *SessionHandler) GetSession(c *gin.Context) {
 
 // GetQRCode gera um QR code para autenticação
 func (h *SessionHandler) GetQRCode(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "ID da sessão é obrigatório"})
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
 		return
 	}
 
+	userIDStr := userID.(string)
+
 	// Verificar se já existe uma sessão e se está autenticada
-	client, exists := h.sessionManager.GetSession(id)
+	client, exists := h.sessionManager.GetSession(userIDStr)
 	if exists && client.WAClient.Store.ID != nil {
 		if !client.Connected {
 			// Sessão autenticada mas desconectada - resetar automaticamente
-			logger.Info("Resetando sessão autenticada mas desconectada", "user_id", id)
-			if err := h.sessionManager.ResetSession(c.Request.Context(), id); err != nil {
-				logger.Error("Falha ao resetar sessão", "error", err, "user_id", id)
+			logger.Info("Resetando sessão autenticada mas desconectada", "user_id", userIDStr)
+			if err := h.sessionManager.ResetSession(c.Request.Context(), userIDStr); err != nil {
+				logger.Error("Falha ao resetar sessão", "error", err, "user_id", userIDStr)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao resetar sessão", "details": err.Error()})
 				return
 			}
@@ -147,9 +159,9 @@ func (h *SessionHandler) GetQRCode(c *gin.Context) {
 	defer cancel()
 
 	// Obter canal de QR
-	qrChan, err := h.sessionManager.GetQRChannel(ctx, id)
+	qrChan, err := h.sessionManager.GetQRChannel(ctx, userIDStr)
 	if err != nil {
-		logger.Error("Falha ao obter canal QR", "error", err, "user_id", id)
+		logger.Error("Falha ao obter canal QR", "error", err, "user_id", userIDStr)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao gerar QR code", "details": err.Error()})
 		return
 	}
@@ -179,11 +191,11 @@ func (h *SessionHandler) GetQRCode(c *gin.Context) {
 				return
 			}
 
-			logger.Info("Evento QR recebido", "event", evt.Event, "user_id", id)
+			logger.Info("Evento QR recebido", "event", evt.Event, "user_id", userIDStr)
 
 			if evt.Event == "code" {
 				// Imprimir QR no terminal para debug
-				fmt.Println("\n===== QR CODE para sessão", id, "=====")
+				fmt.Println("\n===== QR CODE para sessão", userIDStr, "=====")
 				qrterminal.GenerateHalfBlock(evt.Code, qrterminal.L, os.Stdout)
 				fmt.Println("\nEscaneie o código acima com o seu WhatsApp")
 
@@ -215,7 +227,7 @@ func (h *SessionHandler) GetQRCode(c *gin.Context) {
 
 		case <-connectionCheckTicker.C:
 			// Verificar se o cliente está conectado a cada 5 segundos
-			updatedClient, exists := h.sessionManager.GetSession(id)
+			updatedClient, exists := h.sessionManager.GetSession(userIDStr)
 			if exists && updatedClient.Connected && updatedClient.WAClient.Store.ID != nil {
 				c.SSEvent("success", gin.H{
 					"message": "Cliente autenticado e conectado",
@@ -235,15 +247,17 @@ func (h *SessionHandler) GetQRCode(c *gin.Context) {
 
 // DeleteSession encerra uma sessão
 func (h *SessionHandler) DeleteSession(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "ID da sessão é obrigatório"})
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
 		return
 	}
 
+	userIDStr := userID.(string)
+
 	// Excluir sessão
-	if err := h.sessionManager.DeleteSession(c.Request.Context(), id); err != nil {
-		logger.Error("Falha ao excluir sessão", "error", err, "user_id", id)
+	if err := h.sessionManager.DeleteSession(c.Request.Context(), userIDStr); err != nil {
+		logger.Error("Falha ao excluir sessão", "error", err, "user_id", userIDStr)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao excluir sessão", "details": err.Error()})
 		return
 	}
@@ -253,16 +267,18 @@ func (h *SessionHandler) DeleteSession(c *gin.Context) {
 
 // ConnectSession inicia a conexão com o WhatsApp
 func (h *SessionHandler) ConnectSession(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "ID da sessão é obrigatório"})
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
 		return
 	}
 
+	userIDStr := userID.(string)
+
 	// Iniciar conexão
-	err := h.sessionManager.Connect(c.Request.Context(), id)
+	err := h.sessionManager.Connect(c.Request.Context(), userIDStr)
 	if err != nil {
-		logger.Error("Falha ao conectar sessão", "error", err, "user_id", id)
+		logger.Error("Falha ao conectar sessão", "error", err, "user_id", userIDStr)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao conectar ao WhatsApp", "details": err.Error()})
 		return
 	}
@@ -272,16 +288,18 @@ func (h *SessionHandler) ConnectSession(c *gin.Context) {
 
 // DisconnectSession encerra a conexão com o WhatsApp
 func (h *SessionHandler) DisconnectSession(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "ID da sessão é obrigatório"})
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
 		return
 	}
 
+	userIDStr := userID.(string)
+
 	// Encerrar conexão
-	err := h.sessionManager.Disconnect(id)
+	err := h.sessionManager.Disconnect(userIDStr)
 	if err != nil {
-		logger.Error("Falha ao desconectar sessão", "error", err, "user_id", id)
+		logger.Error("Falha ao desconectar sessão", "error", err, "user_id", userIDStr)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao desconectar do WhatsApp", "details": err.Error()})
 		return
 	}
@@ -291,16 +309,18 @@ func (h *SessionHandler) DisconnectSession(c *gin.Context) {
 
 // LogoutSession encerra e remove a sessão do WhatsApp
 func (h *SessionHandler) LogoutSession(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "ID da sessão é obrigatório"})
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
 		return
 	}
 
+	userIDStr := userID.(string)
+
 	// Fazer logout da sessão
-	err := h.sessionManager.Logout(c.Request.Context(), id)
+	err := h.sessionManager.Logout(c.Request.Context(), userIDStr)
 	if err != nil {
-		logger.Error("Falha ao fazer logout da sessão", "error", err, "user_id", id)
+		logger.Error("Falha ao fazer logout da sessão", "error", err, "user_id", userIDStr)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao fazer logout do WhatsApp", "details": err.Error()})
 		return
 	}

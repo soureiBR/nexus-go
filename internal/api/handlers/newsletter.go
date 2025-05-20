@@ -29,7 +29,6 @@ func NewNewsletterHandler(ns *whatsapp.NewsletterService) *NewsletterHandler {
 
 // CreateChannelRequest representa a requisição para criar um canal
 type CreateChannelRequest struct {
-	UserID      string `json:"user_id" binding:"required"`
 	Name        string `json:"name" binding:"required"`
 	Description string `json:"description"`
 	PictureURL  string `json:"picture_url"`
@@ -37,23 +36,27 @@ type CreateChannelRequest struct {
 
 // ChannelJIDRequest representa uma requisição que identifica um canal por JID
 type ChannelJIDRequest struct {
-	UserID string `json:"user_id" binding:"required"`
-	JID    string `json:"jid" binding:"required"`
+	JID string `json:"jid" binding:"required"`
 }
 
 // ChannelInviteRequest representa uma requisição para obter canal por convite
 type ChannelInviteRequest struct {
-	UserID     string `json:"user_id" binding:"required"`
 	InviteLink string `json:"invite_link" binding:"required"`
 }
 
 // ListChannelsRequest representa uma requisição para listar canais
-type ListChannelsRequest struct {
-	UserID string `json:"user_id" binding:"required"`
-}
+type ListChannelsRequest struct{}
 
 // CreateChannel cria um novo canal do WhatsApp
 func (h *NewsletterHandler) CreateChannel(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
+		return
+	}
+
+	userIDStr := userID.(string)
+
 	var req CreateChannelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
@@ -76,9 +79,9 @@ func (h *NewsletterHandler) CreateChannel(c *gin.Context) {
 	}
 
 	// Criar canal
-	metadata, err := h.newsletterService.CreateChannel(c.Request.Context(), req.UserID, req.Name, req.Description, picture)
+	metadata, err := h.newsletterService.CreateChannel(c.Request.Context(), userIDStr, req.Name, req.Description, picture)
 	if err != nil {
-		logger.Error("Falha ao criar canal", "error", err, "user_id", req.UserID)
+		logger.Error("Falha ao criar canal", "error", err, "user_id", userIDStr)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao criar canal", "details": err.Error()})
 		return
 	}
@@ -116,6 +119,14 @@ func downloadPictureFromURL(url string) ([]byte, error) {
 
 // GetChannelInfo obtém informações sobre um canal específico
 func (h *NewsletterHandler) GetChannelInfo(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
+		return
+	}
+
+	userIDStr := userID.(string)
+
 	var req ChannelJIDRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
@@ -130,9 +141,9 @@ func (h *NewsletterHandler) GetChannelInfo(c *gin.Context) {
 	}
 
 	// Obter informações do canal
-	metadata, err := h.newsletterService.GetChannelInfo(c.Request.Context(), req.UserID, jid)
+	metadata, err := h.newsletterService.GetChannelInfo(c.Request.Context(), userIDStr, jid)
 	if err != nil {
-		logger.Error("Falha ao obter informações do canal", "error", err, "user_id", req.UserID, "jid", req.JID)
+		logger.Error("Falha ao obter informações do canal", "error", err, "user_id", userIDStr, "jid", req.JID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao obter informações do canal", "details": err.Error()})
 		return
 	}
@@ -142,6 +153,14 @@ func (h *NewsletterHandler) GetChannelInfo(c *gin.Context) {
 
 // GetChannelWithInvite obtém informações do canal usando um link de convite
 func (h *NewsletterHandler) GetChannelWithInvite(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
+		return
+	}
+
+	userIDStr := userID.(string)
+
 	var req ChannelInviteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
@@ -149,9 +168,9 @@ func (h *NewsletterHandler) GetChannelWithInvite(c *gin.Context) {
 	}
 
 	// Obter informações do canal por convite
-	metadata, err := h.newsletterService.GetChannelWithInvite(c.Request.Context(), req.UserID, req.InviteLink)
+	metadata, err := h.newsletterService.GetChannelWithInvite(c.Request.Context(), userIDStr, req.InviteLink)
 	if err != nil {
-		logger.Error("Falha ao obter informações do canal por convite", "error", err, "user_id", req.UserID)
+		logger.Error("Falha ao obter informações do canal por convite", "error", err, "user_id", userIDStr)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao obter informações do canal por convite", "details": err.Error()})
 		return
 	}
@@ -161,6 +180,14 @@ func (h *NewsletterHandler) GetChannelWithInvite(c *gin.Context) {
 
 // ListMyChannels lista todos os canais que o usuário está inscrito
 func (h *NewsletterHandler) ListMyChannels(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
+		return
+	}
+
+	userIDStr := userID.(string)
+
 	var req ListChannelsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
@@ -168,9 +195,9 @@ func (h *NewsletterHandler) ListMyChannels(c *gin.Context) {
 	}
 
 	// Listar canais inscritos
-	channels, err := h.newsletterService.ListMyChannels(c.Request.Context(), req.UserID)
+	channels, err := h.newsletterService.ListMyChannels(c.Request.Context(), userIDStr)
 	if err != nil {
-		logger.Error("Falha ao listar canais inscritos", "error", err, "user_id", req.UserID)
+		logger.Error("Falha ao listar canais inscritos", "error", err, "user_id", userIDStr)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao listar canais inscritos", "details": err.Error()})
 		return
 	}
@@ -180,6 +207,14 @@ func (h *NewsletterHandler) ListMyChannels(c *gin.Context) {
 
 // FollowChannel inscreve o usuário em um canal
 func (h *NewsletterHandler) FollowChannel(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
+		return
+	}
+
+	userIDStr := userID.(string)
+
 	var req ChannelJIDRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
@@ -194,9 +229,9 @@ func (h *NewsletterHandler) FollowChannel(c *gin.Context) {
 	}
 
 	// Seguir canal
-	err = h.newsletterService.FollowChannel(c.Request.Context(), req.UserID, jid)
+	err = h.newsletterService.FollowChannel(c.Request.Context(), userIDStr, jid)
 	if err != nil {
-		logger.Error("Falha ao seguir canal", "error", err, "user_id", req.UserID, "jid", req.JID)
+		logger.Error("Falha ao seguir canal", "error", err, "user_id", userIDStr, "jid", req.JID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao seguir canal", "details": err.Error()})
 		return
 	}
@@ -206,6 +241,14 @@ func (h *NewsletterHandler) FollowChannel(c *gin.Context) {
 
 // UnfollowChannel cancela a inscrição do usuário em um canal
 func (h *NewsletterHandler) UnfollowChannel(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
+		return
+	}
+
+	userIDStr := userID.(string)
+
 	var req ChannelJIDRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
@@ -220,9 +263,9 @@ func (h *NewsletterHandler) UnfollowChannel(c *gin.Context) {
 	}
 
 	// Deixar de seguir canal
-	err = h.newsletterService.UnfollowChannel(c.Request.Context(), req.UserID, jid)
+	err = h.newsletterService.UnfollowChannel(c.Request.Context(), userIDStr, jid)
 	if err != nil {
-		logger.Error("Falha ao deixar de seguir canal", "error", err, "user_id", req.UserID, "jid", req.JID)
+		logger.Error("Falha ao deixar de seguir canal", "error", err, "user_id", userIDStr, "jid", req.JID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao deixar de seguir canal", "details": err.Error()})
 		return
 	}
@@ -232,6 +275,14 @@ func (h *NewsletterHandler) UnfollowChannel(c *gin.Context) {
 
 // MuteChannel silencia notificações de um canal
 func (h *NewsletterHandler) MuteChannel(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
+		return
+	}
+
+	userIDStr := userID.(string)
+
 	var req ChannelJIDRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
@@ -246,9 +297,9 @@ func (h *NewsletterHandler) MuteChannel(c *gin.Context) {
 	}
 
 	// Silenciar canal
-	err = h.newsletterService.MuteChannel(c.Request.Context(), req.UserID, jid)
+	err = h.newsletterService.MuteChannel(c.Request.Context(), userIDStr, jid)
 	if err != nil {
-		logger.Error("Falha ao silenciar canal", "error", err, "user_id", req.UserID, "jid", req.JID)
+		logger.Error("Falha ao silenciar canal", "error", err, "user_id", userIDStr, "jid", req.JID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao silenciar canal", "details": err.Error()})
 		return
 	}
@@ -258,6 +309,14 @@ func (h *NewsletterHandler) MuteChannel(c *gin.Context) {
 
 // UnmuteChannel reativa notificações de um canal
 func (h *NewsletterHandler) UnmuteChannel(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
+		return
+	}
+
+	userIDStr := userID.(string)
+
 	var req ChannelJIDRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
@@ -272,9 +331,9 @@ func (h *NewsletterHandler) UnmuteChannel(c *gin.Context) {
 	}
 
 	// Reativar notificações do canal
-	err = h.newsletterService.UnmuteChannel(c.Request.Context(), req.UserID, jid)
+	err = h.newsletterService.UnmuteChannel(c.Request.Context(), userIDStr, jid)
 	if err != nil {
-		logger.Error("Falha ao reativar notificações do canal", "error", err, "user_id", req.UserID, "jid", req.JID)
+		logger.Error("Falha ao reativar notificações do canal", "error", err, "user_id", userIDStr, "jid", req.JID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao reativar notificações do canal", "details": err.Error()})
 		return
 	}

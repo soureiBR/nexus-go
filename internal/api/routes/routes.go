@@ -31,11 +31,11 @@ func SetupRoutes(
 	session := v1.Group("/session")
 	{
 		session.POST("/create", sessionHandler.CreateSession)
-		session.GET("/:id", sessionHandler.GetSession)
-		session.GET("/:id/qr", sessionHandler.GetQRCode)
-		session.POST("/:id/connect", sessionHandler.ConnectSession)
-		session.POST("/:id/disconnect", sessionHandler.DisconnectSession)
-		session.DELETE("/:id", sessionHandler.DeleteSession)
+		session.GET("/", sessionHandler.GetSession)
+		session.GET("/qr", sessionHandler.GetQRCode)
+		session.POST("/connect", sessionHandler.ConnectSession)
+		session.POST("/disconnect", sessionHandler.DisconnectSession)
+		session.DELETE("/", sessionHandler.DeleteSession)
 	}
 
 	// Rotas de mensagem
