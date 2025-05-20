@@ -25,7 +25,7 @@ func SetupRoutes(
 
 	// Grupo de rotas para API v1
 	v1 := r.Group("/api/v1")
-	v1.Use(authMiddleware.Authenticate())
+	v1.Use(authMiddleware.AuthenticateAndExtractUserID())
 
 	// Rotas de sessão
 	session := v1.Group("/session")

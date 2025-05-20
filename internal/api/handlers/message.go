@@ -15,7 +15,6 @@ type MessageHandler struct {
 }
 
 type TextMessageRequest struct {
-	UserID  string `json:"user_id" binding:"required"`
 	To      string `json:"to" binding:"required"`
 	Message string `json:"message" binding:"required"`
 }
@@ -58,6 +57,14 @@ func NewMessageHandler(sm *whatsapp.SessionManager) *MessageHandler {
 
 // SendText envia uma mensagem de texto
 func (h *MessageHandler) SendText(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
+		return
+	}
+
+	userIDStr := userID.(string)
+
 	var req TextMessageRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
@@ -65,7 +72,7 @@ func (h *MessageHandler) SendText(c *gin.Context) {
 	}
 
 	// Verificar se a sessão existe
-	client, exists := h.sessionManager.GetSession(req.UserID)
+	client, exists := h.sessionManager.GetSession(userIDStr)
 	if !exists {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Sessão não encontrada"})
 		return
@@ -78,9 +85,9 @@ func (h *MessageHandler) SendText(c *gin.Context) {
 	}
 
 	// Enviar mensagem
-	msgID, err := h.sessionManager.SendText(req.UserID, req.To, req.Message)
+	msgID, err := h.sessionManager.SendText(userIDStr, req.To, req.Message)
 	if err != nil {
-		logger.Error("Falha ao enviar mensagem", "error", err, "user_id", req.UserID, "to", req.To)
+		logger.Error("Falha ao enviar mensagem", "error", err, "user_id", userIDStr, "to", req.To)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao enviar mensagem", "details": err.Error()})
 		return
 	}
