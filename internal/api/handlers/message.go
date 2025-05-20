@@ -2,11 +2,7 @@
 package handlers
 
 import (
-	"io"
-	"mime/multipart"
 	"net/http"
-	"os"
-	"path/filepath"
 
 	"github.com/gin-gonic/gin"
 
@@ -58,29 +54,6 @@ func NewMessageHandler(sm *whatsapp.SessionManager) *MessageHandler {
 	return &MessageHandler{
 		sessionManager: sm,
 	}
-}
-
-// SaveUploadedFile salva um arquivo enviado pelo cliente
-func saveUploadedFile(file *multipart.FileHeader, dst string) error {
-	src, err := file.Open()
-	if err != nil {
-		return err
-	}
-	defer src.Close()
-
-	// Garantir que o diretório existe
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
-		return err
-	}
-
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	_, err = io.Copy(out, src)
-	return err
 }
 
 // SendText envia uma mensagem de texto
