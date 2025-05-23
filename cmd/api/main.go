@@ -55,6 +55,17 @@ func main() {
 		log.Printf("Warning: Failed to load all sessions: %v", err)
 	}
 
+	// Auto-initialize workers for all existing sessions
+	logger.Info("Inicializando workers para todas as sessões...")
+	if err := sessionManager.AutoInitWorkers(); err != nil {
+		log.Printf("Warning: Some workers failed to initialize: %v", err)
+	} else {
+		logger.Info("Workers inicializados com sucesso para todas as sessões")
+	}
+
+	// Start periodic cleanup for inactive sessions (every 30 minutes, remove sessions inactive for 24 hours)
+	sessionManager.StartPeriodicCleanup(30*time.Minute, 24*time.Hour)
+
 	// Initialize newsletter service
 	newsLetterService := whatsapp.NewNewsletterService(sessionManager)
 
@@ -66,12 +77,20 @@ func main() {
 		return webhookService.DispatchEvent(userID, "message", evt)
 	})
 	sessionManager.RegisterEventHandler("connected", func(userID string, evt interface{}) error {
+		// When a session connects, try to initialize a worker for it
+		if _, err := sessionManager.InitWorker(userID); err != nil {
+			logger.Warn("Falha ao inicializar worker para sessão conectada", "user_id", userID, "error", err)
+		}
 		return webhookService.DispatchEvent(userID, "connected", evt)
 	})
 	sessionManager.RegisterEventHandler("disconnected", func(userID string, evt interface{}) error {
 		return webhookService.DispatchEvent(userID, "disconnected", evt)
 	})
 	sessionManager.RegisterEventHandler("logged_out", func(userID string, evt interface{}) error {
+		// Stop worker when session logs out
+		if err := sessionManager.StopWorker(userID); err != nil {
+			logger.Warn("Falha ao parar worker para sessão deslogada", "user_id", userID, "error", err)
+		}
 		return webhookService.DispatchEvent(userID, "logged_out", evt)
 	})
 	sessionManager.RegisterEventHandler("qr", func(userID string, evt interface{}) error {

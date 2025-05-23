@@ -81,8 +81,8 @@ func (h *MessageHandler) SendText(c *gin.Context) {
 		return
 	}
 
-	// Enviar mensagem
-	msgID, err := h.sessionManager.SendText(userIDStr, req.To, req.Message)
+	// Enviar mensagem usando worker se disponível
+	msgID, err := h.sessionManager.SendTextWithWorker(userIDStr, req.To, req.Message)
 	if err != nil {
 		logger.Error("Falha ao enviar mensagem", "error", err, "user_id", userIDStr, "to", req.To)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao enviar mensagem", "details": err.Error()})
@@ -130,8 +130,8 @@ func (h *MessageHandler) SendMedia(c *gin.Context) {
 		return
 	}
 
-	// Enviar mídia usando a URL
-	msgID, err := h.sessionManager.SendMedia(userIDStr, req.To, req.MediaURL, req.MediaType, req.Caption)
+	// Enviar mídia usando worker se disponível
+	msgID, err := h.sessionManager.SendMediaWithWorker(userIDStr, req.To, req.MediaURL, req.MediaType, req.Caption)
 	if err != nil {
 		logger.Error("Falha ao enviar mídia", "error", err, "user_id", userIDStr, "to", req.To)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao enviar mídia", "details": err.Error()})
@@ -173,8 +173,8 @@ func (h *MessageHandler) SendButtons(c *gin.Context) {
 		return
 	}
 
-	// Enviar mensagem com botões
-	msgID, err := h.sessionManager.SendButtons(userIDStr, req.To, req.Text, req.Footer, req.Buttons)
+	// Enviar mensagem com botões usando worker se disponível
+	msgID, err := h.sessionManager.SendButtonsWithWorker(userIDStr, req.To, req.Text, req.Footer, req.Buttons)
 	if err != nil {
 		logger.Error("Falha ao enviar mensagem com botões", "error", err, "user_id", userIDStr, "to", req.To)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao enviar mensagem com botões", "details": err.Error()})
@@ -216,8 +216,8 @@ func (h *MessageHandler) SendList(c *gin.Context) {
 		return
 	}
 
-	// Enviar mensagem com lista
-	msgID, err := h.sessionManager.SendList(userIDStr, req.To, req.Text, req.Footer, req.ButtonText, req.Sections)
+	// Enviar mensagem com lista usando worker se disponível
+	msgID, err := h.sessionManager.SendListWithWorker(userIDStr, req.To, req.Text, req.Footer, req.ButtonText, req.Sections)
 	if err != nil {
 		logger.Error("Falha ao enviar mensagem com lista", "error", err, "user_id", userIDStr, "to", req.To)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao enviar mensagem com lista", "details": err.Error()})

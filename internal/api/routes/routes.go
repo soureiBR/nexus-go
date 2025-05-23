@@ -102,6 +102,8 @@ func SetupRoutes(
 		webhook.POST("/configure", webhookHandler.Configure)
 		webhook.GET("/status", webhookHandler.Status)
 		webhook.POST("/test", webhookHandler.Test)
+		webhook.POST("/enable", webhookHandler.Enable)
+		webhook.POST("/disable", webhookHandler.Disable)
 	}
 
 	// Rota para versão da API

@@ -11,7 +11,7 @@ import (
 	"net/http"
 	"sync"
 	"time"
-	
+
 	"yourproject/pkg/logger"
 )
 
@@ -21,7 +21,8 @@ type Dispatcher struct {
 	enabledEvents map[string]bool
 	secret        string
 	client        *http.Client
-	
+	disabled      bool // Flag to disable all webhook functionality
+
 	// Estado
 	connected      bool
 	lastError      string
@@ -34,6 +35,7 @@ type WebhookStatus struct {
 	URL            string
 	EnabledEvents  []string
 	Connected      bool
+	Disabled       bool // Indicates if webhook is disabled
 	LastError      string
 	LastSuccessful time.Time
 }
@@ -49,11 +51,12 @@ func NewDispatcher(url string) *Dispatcher {
 			IdleConnTimeout:     30 * time.Second,
 		},
 	}
-	
+
 	return &Dispatcher{
 		url:           url,
 		enabledEvents: make(map[string]bool),
 		client:        client,
+		disabled:      true, // Webhook disabled by default
 		mutex:         sync.RWMutex{},
 	}
 }
@@ -62,28 +65,34 @@ func NewDispatcher(url string) *Dispatcher {
 func (d *Dispatcher) Configure(url string, events []string, secret string) error {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
-	
+
+	// Check if webhook is disabled
+	if d.disabled {
+		logger.Info("Webhook is disabled, configuration ignored", "url", url)
+		return fmt.Errorf("webhook está desabilitado")
+	}
+
 	// Atualizar URL
 	d.url = url
-	
+
 	// Atualizar eventos habilitados
 	d.enabledEvents = make(map[string]bool)
 	for _, evt := range events {
 		d.enabledEvents[evt] = true
 	}
-	
+
 	// Atualizar secret
 	d.secret = secret
-	
+
 	// Testar conexão com webhook
 	err := d.testConnection()
 	d.connected = (err == nil)
-	
+
 	if err != nil {
 		d.lastError = err.Error()
 		return fmt.Errorf("falha ao testar conexão com webhook: %w", err)
 	}
-	
+
 	d.lastSuccessful = time.Now()
 	logger.Info("Webhook configurado com sucesso", "url", url, "events", events)
 	return nil
@@ -100,12 +109,12 @@ func (d *Dispatcher) IsConfigured() bool {
 func (d *Dispatcher) IsEventEnabled(eventType string) bool {
 	d.mutex.RLock()
 	defer d.mutex.RUnlock()
-	
+
 	// Se nenhum evento específico estiver configurado, todos estão habilitados
 	if len(d.enabledEvents) == 0 {
 		return true
 	}
-	
+
 	return d.enabledEvents[eventType]
 }
 
@@ -113,34 +122,69 @@ func (d *Dispatcher) IsEventEnabled(eventType string) bool {
 func (d *Dispatcher) GetStatus() WebhookStatus {
 	d.mutex.RLock()
 	defer d.mutex.RUnlock()
-	
+
 	// Converter mapa de eventos para slice
 	var events []string
 	for evt := range d.enabledEvents {
 		events = append(events, evt)
 	}
-	
+
 	return WebhookStatus{
 		URL:            d.url,
 		EnabledEvents:  events,
 		Connected:      d.connected,
+		Disabled:       d.disabled,
 		LastError:      d.lastError,
 		LastSuccessful: d.lastSuccessful,
 	}
 }
 
+// Enable enables the webhook system
+func (d *Dispatcher) Enable() {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	d.disabled = false
+	logger.Info("Webhook system enabled")
+}
+
+// Disable disables the webhook system
+func (d *Dispatcher) Disable() {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	d.disabled = true
+	d.connected = false
+	logger.Info("Webhook system disabled")
+}
+
+// IsDisabled returns whether the webhook system is disabled
+func (d *Dispatcher) IsDisabled() bool {
+	d.mutex.RLock()
+	defer d.mutex.RUnlock()
+	return d.disabled
+}
+
 // DispatchEvent envia um evento para o webhook configurado
 func (d *Dispatcher) DispatchEvent(userID string, eventType string, data interface{}) error {
+	// Check if webhook is disabled
+	d.mutex.RLock()
+	disabled := d.disabled
+	d.mutex.RUnlock()
+
+	if disabled {
+		logger.Debug("Webhook disabled, ignoring event", "event", eventType, "user_id", userID)
+		return nil // Silently ignore when disabled
+	}
+
 	// Verificar se webhook está configurado
 	if !d.IsConfigured() {
 		return fmt.Errorf("webhook não configurado")
 	}
-	
+
 	// Verificar se o evento está habilitado
 	if !d.IsEventEnabled(eventType) {
 		return nil // Evento não habilitado, ignorar silenciosamente
 	}
-	
+
 	// Preparar payload
 	payload := map[string]interface{}{
 		"user_id":    userID,
@@ -148,50 +192,50 @@ func (d *Dispatcher) DispatchEvent(userID string, eventType string, data interfa
 		"timestamp":  time.Now().UTC().Format(time.RFC3339),
 		"data":       data,
 	}
-	
+
 	// Serializar payload
 	jsonPayload, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("falha ao serializar payload: %w", err)
 	}
-	
+
 	// Criar request
 	req, err := http.NewRequest("POST", d.url, bytes.NewBuffer(jsonPayload))
 	if err != nil {
 		return fmt.Errorf("falha ao criar request: %w", err)
 	}
-	
+
 	// Adicionar headers
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "YourProject-WhatsApp-API/1.0")
 	req.Header.Set("X-WhatsApp-Event", eventType)
-	
+
 	// Adicionar signature se secret estiver configurado
 	d.mutex.RLock()
 	secret := d.secret
 	d.mutex.RUnlock()
-	
+
 	if secret != "" {
 		signature := computeHMAC(jsonPayload, []byte(secret))
 		req.Header.Set("X-Hub-Signature", fmt.Sprintf("sha256=%s", signature))
 	}
-	
+
 	// Enviar request em uma goroutine para não bloquear
 	go func() {
 		resp, err := d.client.Do(req)
-		
+
 		d.mutex.Lock()
 		defer d.mutex.Unlock()
-		
+
 		if err != nil {
 			d.connected = false
 			d.lastError = err.Error()
 			logger.Error("Falha ao enviar webhook", "error", err, "event", eventType, "user_id", userID)
 			return
 		}
-		
+
 		defer resp.Body.Close()
-		
+
 		// Verificar status da resposta
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			d.connected = false
@@ -199,13 +243,13 @@ func (d *Dispatcher) DispatchEvent(userID string, eventType string, data interfa
 			logger.Error("Resposta de webhook inválida", "status", resp.StatusCode, "event", eventType, "user_id", userID)
 			return
 		}
-		
+
 		// Webhook enviado com sucesso
 		d.connected = true
 		d.lastSuccessful = time.Now()
 		logger.Debug("Webhook enviado com sucesso", "event", eventType, "user_id", userID)
 	}()
-	
+
 	return nil
 }
 
@@ -217,42 +261,42 @@ func (d *Dispatcher) testConnection() error {
 		"timestamp":  time.Now().UTC().Format(time.RFC3339),
 		"data":       map[string]string{"message": "Teste de conexão"},
 	}
-	
+
 	// Serializar payload
 	jsonPayload, err := json.Marshal(testPayload)
 	if err != nil {
 		return fmt.Errorf("falha ao serializar payload de teste: %w", err)
 	}
-	
+
 	// Criar request
 	req, err := http.NewRequest("POST", d.url, bytes.NewBuffer(jsonPayload))
 	if err != nil {
 		return fmt.Errorf("falha ao criar request de teste: %w", err)
 	}
-	
+
 	// Adicionar headers
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "YourProject-WhatsApp-API/1.0")
 	req.Header.Set("X-WhatsApp-Event", "test")
-	
+
 	// Adicionar signature se secret estiver configurado
 	if d.secret != "" {
 		signature := computeHMAC(jsonPayload, []byte(d.secret))
 		req.Header.Set("X-Hub-Signature", fmt.Sprintf("sha256=%s", signature))
 	}
-	
+
 	// Enviar request
 	resp, err := d.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("falha ao conectar ao webhook: %w", err)
 	}
 	defer resp.Body.Close()
-	
+
 	// Verificar status da resposta
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("status HTTP inesperado: %d", resp.StatusCode)
 	}
-	
+
 	return nil
 }
 

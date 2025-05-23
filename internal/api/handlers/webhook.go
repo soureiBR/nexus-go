@@ -3,9 +3,9 @@ package handlers
 
 import (
 	"net/http"
-	
+
 	"github.com/gin-gonic/gin"
-	
+
 	"yourproject/internal/services/webhook"
 	"yourproject/pkg/logger"
 )
@@ -15,17 +15,18 @@ type WebhookHandler struct {
 }
 
 type ConfigureWebhookRequest struct {
-	URL             string   `json:"url" binding:"required,url"`
-	EnabledEvents   []string `json:"enabled_events"`
-	Secret          string   `json:"secret"`
+	URL           string   `json:"url" binding:"required,url"`
+	EnabledEvents []string `json:"enabled_events"`
+	Secret        string   `json:"secret"`
 }
 
 type WebhookStatusResponse struct {
-	URL             string   `json:"url"`
-	EnabledEvents   []string `json:"enabled_events"`
-	Connected       bool     `json:"connected"`
-	LastError       string   `json:"last_error,omitempty"`
-	LastSuccessful  string   `json:"last_successful,omitempty"`
+	URL            string   `json:"url"`
+	EnabledEvents  []string `json:"enabled_events"`
+	Connected      bool     `json:"connected"`
+	Disabled       bool     `json:"disabled"`
+	LastError      string   `json:"last_error,omitempty"`
+	LastSuccessful string   `json:"last_successful,omitempty"`
 }
 
 func NewWebhookHandler(ws *webhook.Dispatcher) *WebhookHandler {
@@ -41,7 +42,7 @@ func (h *WebhookHandler) Configure(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
 		return
 	}
-	
+
 	// Lista de eventos válidos
 	validEvents := map[string]bool{
 		"message":      true,
@@ -50,7 +51,7 @@ func (h *WebhookHandler) Configure(c *gin.Context) {
 		"qr":           true,
 		"logged_out":   true,
 	}
-	
+
 	// Verificar se os eventos são válidos
 	enabledEvents := make([]string, 0)
 	for _, evt := range req.EnabledEvents {
@@ -58,12 +59,12 @@ func (h *WebhookHandler) Configure(c *gin.Context) {
 			enabledEvents = append(enabledEvents, evt)
 		}
 	}
-	
+
 	// Se nenhum evento válido for fornecido, habilitar todos
 	if len(enabledEvents) == 0 {
 		enabledEvents = []string{"message", "connected", "disconnected", "qr", "logged_out"}
 	}
-	
+
 	// Configurar webhook
 	err := h.webhookService.Configure(req.URL, enabledEvents, req.Secret)
 	if err != nil {
@@ -71,7 +72,7 @@ func (h *WebhookHandler) Configure(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao configurar webhook", "details": err.Error()})
 		return
 	}
-	
+
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Webhook configurado com sucesso",
 		"url":     req.URL,
@@ -82,21 +83,22 @@ func (h *WebhookHandler) Configure(c *gin.Context) {
 // Status retorna o status atual do webhook
 func (h *WebhookHandler) Status(c *gin.Context) {
 	status := h.webhookService.GetStatus()
-	
+
 	response := WebhookStatusResponse{
 		URL:           status.URL,
 		EnabledEvents: status.EnabledEvents,
 		Connected:     status.Connected,
+		Disabled:      status.Disabled,
 	}
-	
+
 	if status.LastError != "" {
 		response.LastError = status.LastError
 	}
-	
+
 	if !status.LastSuccessful.IsZero() {
 		response.LastSuccessful = status.LastSuccessful.Format(http.TimeFormat)
 	}
-	
+
 	c.JSON(http.StatusOK, response)
 }
 
@@ -106,7 +108,7 @@ func (h *WebhookHandler) Test(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Webhook não configurado"})
 		return
 	}
-	
+
 	// Evento de teste
 	testEvent := map[string]interface{}{
 		"type": "test",
@@ -115,7 +117,7 @@ func (h *WebhookHandler) Test(c *gin.Context) {
 			"time":    c.Request.URL.Query().Get("time"),
 		},
 	}
-	
+
 	// Enviar evento de teste
 	err := h.webhookService.DispatchEvent("test", "test", testEvent)
 	if err != nil {
@@ -123,6 +125,18 @@ func (h *WebhookHandler) Test(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao enviar evento de teste", "details": err.Error()})
 		return
 	}
-	
+
 	c.JSON(http.StatusOK, gin.H{"message": "Evento de teste enviado com sucesso"})
+}
+
+// Enable enables the webhook system
+func (h *WebhookHandler) Enable(c *gin.Context) {
+	h.webhookService.Enable()
+	c.JSON(http.StatusOK, gin.H{"message": "Webhook system enabled"})
+}
+
+// Disable disables the webhook system
+func (h *WebhookHandler) Disable(c *gin.Context) {
+	h.webhookService.Disable()
+	c.JSON(http.StatusOK, gin.H{"message": "Webhook system disabled"})
 }

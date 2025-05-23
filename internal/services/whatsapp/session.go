@@ -20,6 +20,8 @@ import (
 type SessionManager struct {
 	clients       map[string]*Client
 	clientsMutex  sync.RWMutex
+	workers       map[string]*SessionWorker // Add workers map
+	workersMutex  sync.RWMutex              // Add workers mutex
 	sqlStore      *storage.SQLStore
 	eventHandlers map[string][]EventHandler
 	logger        waLog.Logger
@@ -32,6 +34,7 @@ type Client struct {
 	Connected  bool
 	CreatedAt  time.Time
 	LastActive time.Time
+	worker     *SessionWorker // Add worker reference
 }
 
 // EventHandler processes WhatsApp events
@@ -44,6 +47,7 @@ func NewSessionManager(sqlStore *storage.SQLStore) *SessionManager {
 
 	return &SessionManager{
 		clients:       make(map[string]*Client),
+		workers:       make(map[string]*SessionWorker),
 		sqlStore:      sqlStore,
 		eventHandlers: make(map[string][]EventHandler),
 		logger:        waLogger,
@@ -511,6 +515,9 @@ func (sm *SessionManager) DeleteSession(ctx context.Context, userID string) erro
 
 // Close shuts down the session manager and releases resources
 func (sm *SessionManager) Close() error {
+	// Stop all workers first
+	sm.StopAllWorkers()
+
 	// Disconnect all clients
 	sm.DisconnectAll()
 
@@ -519,5 +526,275 @@ func (sm *SessionManager) Close() error {
 	sm.clients = make(map[string]*Client)
 	sm.clientsMutex.Unlock()
 
+	return nil
+}
+
+// Worker Management Methods
+
+// InitWorker creates and starts a worker for an existing session
+func (sm *SessionManager) InitWorker(userID string) (*SessionWorker, error) {
+	client, exists := sm.GetSession(userID)
+	if !exists {
+		return nil, fmt.Errorf("sessão não encontrada: %s", userID)
+	}
+
+	sm.workersMutex.Lock()
+	defer sm.workersMutex.Unlock()
+
+	// Check if worker already exists
+	if worker, exists := sm.workers[userID]; exists {
+		if worker.IsRunning() {
+			return worker, nil
+		}
+		// If worker exists but not running, remove it
+		delete(sm.workers, userID)
+	}
+
+	// Create new worker
+	worker := NewSessionWorker(userID, client, sm)
+
+	// Update client's event handler to also send events to worker
+	client.WAClient.AddEventHandler(func(evt interface{}) {
+		worker.SendEvent(evt)
+	})
+
+	// Start worker
+	worker.Start()
+
+	// Store worker
+	sm.workers[userID] = worker
+	client.worker = worker
+
+	logger.Info("Worker inicializado para sessão", "user_id", userID)
+	return worker, nil
+}
+
+// GetWorker returns the worker for a session
+func (sm *SessionManager) GetWorker(userID string) (*SessionWorker, bool) {
+	sm.workersMutex.RLock()
+	defer sm.workersMutex.RUnlock()
+
+	worker, exists := sm.workers[userID]
+	return worker, exists
+}
+
+// StopWorker stops a specific worker
+func (sm *SessionManager) StopWorker(userID string) error {
+	sm.workersMutex.Lock()
+	defer sm.workersMutex.Unlock()
+
+	worker, exists := sm.workers[userID]
+	if !exists {
+		return fmt.Errorf("worker não encontrado: %s", userID)
+	}
+
+	worker.Stop()
+	delete(sm.workers, userID)
+
+	// Update client reference
+	if client, exists := sm.GetSession(userID); exists {
+		client.worker = nil
+	}
+
+	logger.Info("Worker parado", "user_id", userID)
+	return nil
+}
+
+// StopAllWorkers stops all workers
+func (sm *SessionManager) StopAllWorkers() {
+	sm.workersMutex.Lock()
+	workers := make([]*SessionWorker, 0, len(sm.workers))
+	for _, worker := range sm.workers {
+		workers = append(workers, worker)
+	}
+	sm.workers = make(map[string]*SessionWorker)
+	sm.workersMutex.Unlock()
+
+	// Stop workers in parallel
+	var wg sync.WaitGroup
+	for _, worker := range workers {
+		wg.Add(1)
+		go func(w *SessionWorker) {
+			defer wg.Done()
+			w.Stop()
+		}(worker)
+	}
+	wg.Wait()
+
+	// Clear worker references from clients
+	sm.clientsMutex.Lock()
+	for _, client := range sm.clients {
+		client.worker = nil
+	}
+	sm.clientsMutex.Unlock()
+
+	logger.Info("Todos os workers foram parados")
+}
+
+// Enhanced methods that use workers when available
+
+// SendTextWithWorker envia mensagem usando worker se disponível
+func (sm *SessionManager) SendTextWithWorker(userID, to, message string) (string, error) {
+	// Try to use worker first
+	if worker, exists := sm.GetWorker(userID); exists && worker.IsRunning() {
+		response := worker.SendCommand(Command{
+			Type: CmdSendText,
+			Payload: SendTextPayload{
+				To:      to,
+				Message: message,
+			},
+		})
+		if response.Error != nil {
+			return "", response.Error
+		}
+		return response.Data.(string), nil
+	}
+
+	// Fallback to existing method
+	return sm.SendText(userID, to, message)
+}
+
+// SendMediaWithWorker envia mídia usando worker se disponível
+func (sm *SessionManager) SendMediaWithWorker(userID, to, mediaURL, mediaType, caption string) (string, error) {
+	// Try to use worker first
+	if worker, exists := sm.GetWorker(userID); exists && worker.IsRunning() {
+		response := worker.SendCommand(Command{
+			Type: CmdSendMedia,
+			Payload: SendMediaPayload{
+				To:        to,
+				MediaURL:  mediaURL,
+				MediaType: mediaType,
+				Caption:   caption,
+			},
+		})
+		if response.Error != nil {
+			return "", response.Error
+		}
+		return response.Data.(string), nil
+	}
+
+	// Fallback to existing method
+	return sm.SendMedia(userID, to, mediaURL, mediaType, caption)
+}
+
+// SendButtonsWithWorker envia botões usando worker se disponível
+func (sm *SessionManager) SendButtonsWithWorker(userID, to, text, footer string, buttons []ButtonData) (string, error) {
+	// Try to use worker first
+	if worker, exists := sm.GetWorker(userID); exists && worker.IsRunning() {
+		response := worker.SendCommand(Command{
+			Type: CmdSendButtons,
+			Payload: SendButtonsPayload{
+				To:      to,
+				Text:    text,
+				Footer:  footer,
+				Buttons: buttons,
+			},
+		})
+		if response.Error != nil {
+			return "", response.Error
+		}
+		return response.Data.(string), nil
+	}
+
+	// Fallback to existing method
+	return sm.SendButtons(userID, to, text, footer, buttons)
+}
+
+// SendListWithWorker envia lista usando worker se disponível
+func (sm *SessionManager) SendListWithWorker(userID, to, text, footer, buttonText string, sections []Section) (string, error) {
+	// Try to use worker first
+	if worker, exists := sm.GetWorker(userID); exists && worker.IsRunning() {
+		response := worker.SendCommand(Command{
+			Type: CmdSendList,
+			Payload: SendListPayload{
+				To:         to,
+				Text:       text,
+				Footer:     footer,
+				ButtonText: buttonText,
+				Sections:   sections,
+			},
+		})
+		if response.Error != nil {
+			return "", response.Error
+		}
+		return response.Data.(string), nil
+	}
+
+	// Fallback to existing method
+	return sm.SendList(userID, to, text, footer, buttonText, sections)
+}
+
+// ConnectWithWorker conecta usando worker se disponível
+func (sm *SessionManager) ConnectWithWorker(ctx context.Context, userID string) error {
+	// Try to use worker first
+	if worker, exists := sm.GetWorker(userID); exists && worker.IsRunning() {
+		response := worker.SendCommand(Command{Type: CmdConnect})
+		return response.Error
+	}
+
+	// Fallback to existing method
+	return sm.Connect(ctx, userID)
+}
+
+// DisconnectWithWorker desconecta usando worker se disponível
+func (sm *SessionManager) DisconnectWithWorker(userID string) error {
+	// Try to use worker first
+	if worker, exists := sm.GetWorker(userID); exists && worker.IsRunning() {
+		response := worker.SendCommand(Command{Type: CmdDisconnect})
+		return response.Error
+	}
+
+	// Fallback to existing method
+	return sm.Disconnect(userID)
+}
+
+// GetSessionStatus retorna status da sessão (worker ou cliente)
+func (sm *SessionManager) GetSessionStatus(userID string) (map[string]interface{}, error) {
+	// Try to use worker first
+	if worker, exists := sm.GetWorker(userID); exists && worker.IsRunning() {
+		response := worker.SendCommand(Command{Type: CmdGetStatus})
+		if response.Error != nil {
+			return nil, response.Error
+		}
+		return response.Data.(map[string]interface{}), nil
+	}
+
+	// Fallback to basic status
+	client, exists := sm.GetSession(userID)
+	if !exists {
+		return nil, fmt.Errorf("sessão não encontrada: %s", userID)
+	}
+
+	return map[string]interface{}{
+		"connected":   client.Connected,
+		"last_active": client.LastActive,
+		"logged_in":   client.WAClient.IsLoggedIn(),
+		"user_id":     userID,
+		"has_worker":  false,
+	}, nil
+}
+
+// AutoInitWorkers automatically initializes workers for all existing sessions
+func (sm *SessionManager) AutoInitWorkers() error {
+	sm.clientsMutex.RLock()
+	userIDs := make([]string, 0, len(sm.clients))
+	for userID := range sm.clients {
+		userIDs = append(userIDs, userID)
+	}
+	sm.clientsMutex.RUnlock()
+
+	var wg sync.WaitGroup
+	for _, userID := range userIDs {
+		wg.Add(1)
+		go func(uid string) {
+			defer wg.Done()
+			if _, err := sm.InitWorker(uid); err != nil {
+				logger.Error("Falha ao inicializar worker", "user_id", uid, "error", err)
+			}
+		}(userID)
+	}
+	wg.Wait()
+
+	logger.Info("Auto-inicialização de workers concluída", "sessions", len(userIDs))
 	return nil
 }
