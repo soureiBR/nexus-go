@@ -9,21 +9,76 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"go.mau.fi/whatsmeow/types"
 
 	"yourproject/internal/services/whatsapp"
+	"yourproject/internal/services/whatsapp/worker"
 	"yourproject/pkg/logger"
 )
 
 // NewsletterHandler gerencia endpoints para operações de canais do WhatsApp
 type NewsletterHandler struct {
-	newsletterService *whatsapp.NewsletterService
+	sessionManager *whatsapp.SessionManager
 }
 
 // NewNewsletterHandler cria um novo handler de newsletter
-func NewNewsletterHandler(ns *whatsapp.NewsletterService) *NewsletterHandler {
+func NewNewsletterHandler(sm *whatsapp.SessionManager) *NewsletterHandler {
 	return &NewsletterHandler{
-		newsletterService: ns,
+		sessionManager: sm,
+	}
+}
+
+// submitWorkerTask submits a task to the worker system and waits for response with proper error handling
+func (h *NewsletterHandler) submitWorkerTask(userID string, taskType worker.CommandType, payload interface{}) (interface{}, error) {
+	// Get coordinator and worker pool
+	coordinator := h.sessionManager.GetCoordinator()
+	if coordinator == nil {
+		return nil, fmt.Errorf("coordinator not available")
+	}
+
+	workerPool := coordinator.GetWorkerPool()
+	if workerPool == nil {
+		return nil, fmt.Errorf("worker pool not available")
+	}
+
+	// Ensure worker exists for user
+	if _, exists := workerPool.GetWorker(userID); !exists {
+		logger.Debug("Creating worker for user", "user_id", userID)
+		if err := coordinator.CreateWorker(userID); err != nil {
+			return nil, fmt.Errorf("failed to create worker: %w", err)
+		}
+
+		// Give worker a moment to initialize
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// Create response channel with proper buffering
+	responseChan := make(chan worker.CommandResponse, 1)
+
+	// Create task
+	task := worker.Task{
+		ID:       fmt.Sprintf("%s_%s_%d", taskType, userID, time.Now().UnixNano()),
+		Type:     taskType,
+		UserID:   userID,
+		Priority: worker.NormalPriority,
+		Payload:  payload,
+		Response: responseChan,
+		Created:  time.Now(),
+	}
+
+	// Submit task to worker pool
+	if err := workerPool.SubmitTask(task); err != nil {
+		return nil, fmt.Errorf("failed to submit task: %w", err)
+	}
+
+	// Wait for response with timeout
+	select {
+	case response := <-responseChan:
+		if response.Error != nil {
+			return nil, response.Error
+		}
+		return response.Data, nil
+	case <-time.After(30 * time.Second):
+		return nil, fmt.Errorf("timeout waiting for worker response")
 	}
 }
 
@@ -63,30 +118,35 @@ func (h *NewsletterHandler) CreateChannel(c *gin.Context) {
 		return
 	}
 
-	// Verificar se há uma imagem enviada
-	var picture []byte
-	if req.PictureURL != "" {
-		var err error
-		picture, err = downloadPictureFromURL(req.PictureURL)
-		if err != nil {
-			logger.Error("Falha ao baixar imagem da URL", "error", err, "url", req.PictureURL)
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error":   "Falha ao baixar imagem da URL",
-				"details": err.Error(),
-			})
-			return
-		}
+	// Verificar se a sessão existe
+	client, exists := h.sessionManager.GetSession(userIDStr)
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Sessão não encontrada"})
+		return
 	}
 
-	// Criar canal
-	metadata, err := h.newsletterService.CreateChannel(c.Request.Context(), userIDStr, req.Name, req.Description, picture)
+	// Verificar se o cliente está conectado
+	if !client.Connected {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Cliente não está conectado"})
+		return
+	}
+
+	// Create payload
+	payload := worker.CreateChannelPayload{
+		Name:        req.Name,
+		Description: req.Description,
+		PictureURL:  req.PictureURL,
+	}
+
+	// Submit task to worker
+	result, err := h.submitWorkerTask(userIDStr, worker.CmdCreateChannel, payload)
 	if err != nil {
 		logger.Error("Falha ao criar canal", "error", err, "user_id", userIDStr)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao criar canal", "details": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusCreated, metadata)
+	c.JSON(http.StatusCreated, result)
 }
 
 func downloadPictureFromURL(url string) ([]byte, error) {
@@ -133,22 +193,33 @@ func (h *NewsletterHandler) GetChannelInfo(c *gin.Context) {
 		return
 	}
 
-	// Converter JID para o formato correto
-	jid, err := types.ParseJID(req.JID)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "JID inválido", "details": err.Error()})
+	// Verificar se a sessão existe
+	client, exists := h.sessionManager.GetSession(userIDStr)
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Sessão não encontrada"})
 		return
 	}
 
-	// Obter informações do canal
-	metadata, err := h.newsletterService.GetChannelInfo(c.Request.Context(), userIDStr, jid)
+	// Verificar se o cliente está conectado
+	if !client.Connected {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Cliente não está conectado"})
+		return
+	}
+
+	// Create payload
+	payload := worker.ChannelJIDPayload{
+		JID: req.JID,
+	}
+
+	// Submit task to worker
+	result, err := h.submitWorkerTask(userIDStr, worker.CmdGetChannelInfo, payload)
 	if err != nil {
 		logger.Error("Falha ao obter informações do canal", "error", err, "user_id", userIDStr, "jid", req.JID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao obter informações do canal", "details": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, metadata)
+	c.JSON(http.StatusOK, result)
 }
 
 // GetChannelWithInvite obtém informações do canal usando um link de convite
@@ -167,15 +238,33 @@ func (h *NewsletterHandler) GetChannelWithInvite(c *gin.Context) {
 		return
 	}
 
-	// Obter informações do canal por convite
-	metadata, err := h.newsletterService.GetChannelWithInvite(c.Request.Context(), userIDStr, req.InviteLink)
+	// Verificar se a sessão existe
+	client, exists := h.sessionManager.GetSession(userIDStr)
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Sessão não encontrada"})
+		return
+	}
+
+	// Verificar se o cliente está conectado
+	if !client.Connected {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Cliente não está conectado"})
+		return
+	}
+
+	// Create payload
+	payload := worker.ChannelInvitePayload{
+		InviteLink: req.InviteLink,
+	}
+
+	// Submit task to worker
+	result, err := h.submitWorkerTask(userIDStr, worker.CmdGetChannelWithInvite, payload)
 	if err != nil {
 		logger.Error("Falha ao obter informações do canal por convite", "error", err, "user_id", userIDStr)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao obter informações do canal por convite", "details": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, metadata)
+	c.JSON(http.StatusOK, result)
 }
 
 // ListMyChannels lista todos os canais que o usuário está inscrito
@@ -188,21 +277,31 @@ func (h *NewsletterHandler) ListMyChannels(c *gin.Context) {
 
 	userIDStr := userID.(string)
 
-	var req ListChannelsRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
+	// Verificar se a sessão existe
+	client, exists := h.sessionManager.GetSession(userIDStr)
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Sessão não encontrada"})
 		return
 	}
 
-	// Listar canais inscritos
-	channels, err := h.newsletterService.ListMyChannels(c.Request.Context(), userIDStr)
+	// Verificar se o cliente está conectado
+	if !client.Connected {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Cliente não está conectado"})
+		return
+	}
+
+	// Create payload
+	payload := worker.ListChannelsPayload{}
+
+	// Submit task to worker
+	result, err := h.submitWorkerTask(userIDStr, worker.CmdListMyChannels, payload)
 	if err != nil {
 		logger.Error("Falha ao listar canais inscritos", "error", err, "user_id", userIDStr)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao listar canais inscritos", "details": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, channels)
+	c.JSON(http.StatusOK, result)
 }
 
 // FollowChannel inscreve o usuário em um canal
@@ -221,15 +320,26 @@ func (h *NewsletterHandler) FollowChannel(c *gin.Context) {
 		return
 	}
 
-	// Converter JID para o formato correto
-	jid, err := types.ParseJID(req.JID)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "JID inválido", "details": err.Error()})
+	// Verificar se a sessão existe
+	client, exists := h.sessionManager.GetSession(userIDStr)
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Sessão não encontrada"})
 		return
 	}
 
-	// Seguir canal
-	err = h.newsletterService.FollowChannel(c.Request.Context(), userIDStr, jid)
+	// Verificar se o cliente está conectado
+	if !client.Connected {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Cliente não está conectado"})
+		return
+	}
+
+	// Create payload
+	payload := worker.ChannelJIDPayload{
+		JID: req.JID,
+	}
+
+	// Submit task to worker
+	_, err := h.submitWorkerTask(userIDStr, worker.CmdFollowChannel, payload)
 	if err != nil {
 		logger.Error("Falha ao seguir canal", "error", err, "user_id", userIDStr, "jid", req.JID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao seguir canal", "details": err.Error()})
@@ -255,15 +365,26 @@ func (h *NewsletterHandler) UnfollowChannel(c *gin.Context) {
 		return
 	}
 
-	// Converter JID para o formato correto
-	jid, err := types.ParseJID(req.JID)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "JID inválido", "details": err.Error()})
+	// Verificar se a sessão existe
+	client, exists := h.sessionManager.GetSession(userIDStr)
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Sessão não encontrada"})
 		return
 	}
 
-	// Deixar de seguir canal
-	err = h.newsletterService.UnfollowChannel(c.Request.Context(), userIDStr, jid)
+	// Verificar se o cliente está conectado
+	if !client.Connected {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Cliente não está conectado"})
+		return
+	}
+
+	// Create payload
+	payload := worker.ChannelJIDPayload{
+		JID: req.JID,
+	}
+
+	// Submit task to worker
+	_, err := h.submitWorkerTask(userIDStr, worker.CmdUnfollowChannel, payload)
 	if err != nil {
 		logger.Error("Falha ao deixar de seguir canal", "error", err, "user_id", userIDStr, "jid", req.JID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao deixar de seguir canal", "details": err.Error()})
@@ -289,15 +410,26 @@ func (h *NewsletterHandler) MuteChannel(c *gin.Context) {
 		return
 	}
 
-	// Converter JID para o formato correto
-	jid, err := types.ParseJID(req.JID)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "JID inválido", "details": err.Error()})
+	// Verificar se a sessão existe
+	client, exists := h.sessionManager.GetSession(userIDStr)
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Sessão não encontrada"})
 		return
 	}
 
-	// Silenciar canal
-	err = h.newsletterService.MuteChannel(c.Request.Context(), userIDStr, jid)
+	// Verificar se o cliente está conectado
+	if !client.Connected {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Cliente não está conectado"})
+		return
+	}
+
+	// Create payload
+	payload := worker.ChannelJIDPayload{
+		JID: req.JID,
+	}
+
+	// Submit task to worker
+	_, err := h.submitWorkerTask(userIDStr, worker.CmdMuteChannel, payload)
 	if err != nil {
 		logger.Error("Falha ao silenciar canal", "error", err, "user_id", userIDStr, "jid", req.JID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao silenciar canal", "details": err.Error()})
@@ -323,15 +455,26 @@ func (h *NewsletterHandler) UnmuteChannel(c *gin.Context) {
 		return
 	}
 
-	// Converter JID para o formato correto
-	jid, err := types.ParseJID(req.JID)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "JID inválido", "details": err.Error()})
+	// Verificar se a sessão existe
+	client, exists := h.sessionManager.GetSession(userIDStr)
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Sessão não encontrada"})
 		return
 	}
 
-	// Reativar notificações do canal
-	err = h.newsletterService.UnmuteChannel(c.Request.Context(), userIDStr, jid)
+	// Verificar se o cliente está conectado
+	if !client.Connected {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Cliente não está conectado"})
+		return
+	}
+
+	// Create payload
+	payload := worker.ChannelJIDPayload{
+		JID: req.JID,
+	}
+
+	// Submit task to worker
+	_, err := h.submitWorkerTask(userIDStr, worker.CmdUnmuteChannel, payload)
 	if err != nil {
 		logger.Error("Falha ao reativar notificações do canal", "error", err, "user_id", userIDStr, "jid", req.JID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao reativar notificações do canal", "details": err.Error()})

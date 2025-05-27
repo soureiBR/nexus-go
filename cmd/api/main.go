@@ -46,6 +46,12 @@ func main() {
 	// Initialize session manager
 	sessionManager := whatsapp.NewSessionManager(sqlStore)
 
+	// Start the coordinator system
+	logger.Info("Iniciando sistema de coordenação...")
+	if err := sessionManager.StartCoordinator(); err != nil {
+		log.Fatalf("Falha ao iniciar coordinator: %v", err)
+	}
+
 	// Create a context for initialization
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -55,9 +61,9 @@ func main() {
 		log.Printf("Warning: Failed to load all sessions: %v", err)
 	}
 
-	// Auto-initialize workers for all existing sessions
-	logger.Info("Inicializando workers para todas as sessões...")
-	if err := sessionManager.AutoInitWorkers(); err != nil {
+	// Auto-initialize workers for all existing sessions using coordinator
+	logger.Info("Inicializando workers para todas as sessões usando coordinator...")
+	if err := sessionManager.GetCoordinator().AutoInitWorkers(); err != nil {
 		log.Printf("Warning: Some workers failed to initialize: %v", err)
 	} else {
 		logger.Info("Workers inicializados com sucesso para todas as sessões")
@@ -65,9 +71,6 @@ func main() {
 
 	// Start periodic cleanup for inactive sessions (every 30 minutes, remove sessions inactive for 24 hours)
 	sessionManager.StartPeriodicCleanup(30*time.Minute, 24*time.Hour)
-
-	// Initialize newsletter service
-	newsLetterService := whatsapp.NewNewsletterService(sessionManager)
 
 	// Configure webhook
 	webhookService := webhook.NewDispatcher(cfg.WebhookURL)
@@ -102,7 +105,7 @@ func main() {
 	messageHandler := handlers.NewMessageHandler(sessionManager)
 	groupHandler := handlers.NewGroupHandler(sessionManager)
 	communityHandler := handlers.NewCommunityHandler(sessionManager)
-	newsletterHandler := handlers.NewNewsletterHandler(newsLetterService)
+	newsletterHandler := handlers.NewNewsletterHandler(sessionManager)
 	webhookHandler := handlers.NewWebhookHandler(webhookService)
 
 	// Configure authentication middleware
@@ -133,8 +136,22 @@ func main() {
 
 	log.Println("Shutting down server...")
 
+	// Stop coordinator system
+	logger.Info("Parando sistema de coordenação...")
+	if err := sessionManager.StopCoordinator(); err != nil {
+		logger.Error("Erro ao parar coordinator", "error", err)
+	}
+
+	// Stop periodic cleanup
+	sessionManager.StopPeriodicCleanup()
+
 	// Disconnect all sessions before exiting
 	sessionManager.DisconnectAll()
+
+	// Close session manager
+	if err := sessionManager.Close(); err != nil {
+		logger.Error("Erro ao fechar session manager", "error", err)
+	}
 
 	// Shutdown server with timeout
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
