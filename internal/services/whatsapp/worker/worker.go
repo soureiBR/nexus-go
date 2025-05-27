@@ -276,7 +276,7 @@ func (w *Worker) processTask(task Task) {
 	case CmdGetChannelWithInvite:
 		response = w.handleGetChannelWithInvite(task.Payload.(ChannelInvitePayload))
 	case CmdListMyChannels:
-		response = w.handleListMyChannels(task.Payload.(ListChannelsPayload))
+		response = w.handleListMyChannels()
 	case CmdFollowChannel:
 		response = w.handleFollowChannel(task.Payload.(ChannelJIDPayload))
 	case CmdUnfollowChannel:
@@ -633,7 +633,7 @@ func (w *Worker) handleGetChannelWithInvite(payload ChannelInvitePayload) Comman
 	return CommandResponse{Data: result}
 }
 
-func (w *Worker) handleListMyChannels(payload ListChannelsPayload) CommandResponse {
+func (w *Worker) handleListMyChannels() CommandResponse {
 	result, err := w.newsletterService.ListMyChannels(w.UserID)
 	if err != nil {
 		return CommandResponse{Error: fmt.Errorf("falha ao listar canais: %w", err)}

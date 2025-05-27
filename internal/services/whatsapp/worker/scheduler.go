@@ -181,15 +181,15 @@ func (ts *TaskScheduler) processTask(task Task) {
 // validateTask valida uma tarefa
 func (ts *TaskScheduler) validateTask(task Task) error {
 	if task.ID == "" {
-		return fmt.Errorf("ID da tarefa é obrigatório")
+		return fmt.Errorf("id da tarefa é obrigatório")
 	}
 
 	if task.UserID == "" {
-		return fmt.Errorf("UserID da tarefa é obrigatório")
+		return fmt.Errorf("userID da tarefa é obrigatório")
 	}
 
 	if task.Type == "" {
-		return fmt.Errorf("Type da tarefa é obrigatório")
+		return fmt.Errorf("type da tarefa é obrigatório")
 	}
 
 	if task.Priority < LowPriority || task.Priority > CriticalPriority {
