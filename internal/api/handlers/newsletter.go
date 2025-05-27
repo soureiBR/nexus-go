@@ -3,9 +3,7 @@ package handlers
 
 import (
 	"fmt"
-	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -147,34 +145,6 @@ func (h *NewsletterHandler) CreateChannel(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, result)
-}
-
-func downloadPictureFromURL(url string) ([]byte, error) {
-	// Create HTTP client with timeout
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-	}
-
-	// Make the request
-	resp, err := client.Get(url)
-	if err != nil {
-		return nil, fmt.Errorf("erro ao acessar URL: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// Check response status
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("status da resposta inválido: %d", resp.StatusCode)
-	}
-
-	// Check content type to ensure it's an image
-	contentType := resp.Header.Get("Content-Type")
-	if !strings.HasPrefix(contentType, "image/") {
-		return nil, fmt.Errorf("o conteúdo não é uma imagem: %s", contentType)
-	}
-
-	// Read the image data
-	return io.ReadAll(resp.Body)
 }
 
 // GetChannelInfo obtém informações sobre um canal específico
