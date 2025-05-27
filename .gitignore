@@ -1,2 +1,8 @@
 # Ignore DB
 ./data/whatsapp.db
+
+*.db
+*.sqlite
+*.sqlite3
+
+.env
