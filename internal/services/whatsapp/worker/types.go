@@ -265,6 +265,10 @@ type SessionManager interface {
 type Coordinator interface {
 	NotifyWorkerStatus(workerID, userID string, status WorkerStatus)
 	ProcessEvent(userID string, event interface{}) error
+	GetCommunityService() CommunityServiceInterface
+	GetGroupService() GroupServiceInterface
+	GetMessageService() MessageServiceInterface
+	GetNewsletterService() NewsletterServiceInterface
 }
 
 // CommunityServiceInterface defines community operations interface

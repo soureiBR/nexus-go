@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"yourproject/internal/services/whatsapp/session"
+	"yourproject/internal/services/whatsapp/worker"
 	"yourproject/pkg/logger"
 
 	"go.mau.fi/whatsmeow"
@@ -242,8 +243,8 @@ func (ms *MessageService) SendMedia(userID, to, mediaURL, mediaType, caption str
 	return msg.ID, nil
 }
 
-// SendButtons envia uma mensagem com botões
-func (ms *MessageService) SendButtons(userID, to, text, footer string, buttons []ButtonData) (string, error) {
+// SendButtons envia uma mensagem com botões - now using worker types directly
+func (ms *MessageService) SendButtons(userID, to, text, footer string, buttons []worker.ButtonData) (string, error) {
 	client, exists := ms.sessionManager.GetSession(userID)
 	if !exists {
 		return "", fmt.Errorf("sessão não encontrada: %s", userID)
@@ -265,7 +266,7 @@ func (ms *MessageService) SendButtons(userID, to, text, footer string, buttons [
 		btnItems = append(btnItems, &waE2E.ButtonsMessage_Button{
 			ButtonID: proto.String(btn.ID),
 			ButtonText: &waE2E.ButtonsMessage_Button_ButtonText{
-				DisplayText: proto.String(btn.Text),
+				DisplayText: proto.String(btn.DisplayText),
 			},
 			Type: waE2E.ButtonsMessage_Button_RESPONSE.Enum(),
 		})
@@ -302,8 +303,8 @@ func (ms *MessageService) SendButtons(userID, to, text, footer string, buttons [
 	return msg.ID, nil
 }
 
-// SendList envia uma mensagem com lista
-func (ms *MessageService) SendList(userID, to, text, footer, buttonText string, sections []Section) (string, error) {
+// SendList envia uma mensagem com lista - now using worker types directly
+func (ms *MessageService) SendList(userID, to, text, footer, buttonText string, sections []worker.Section) (string, error) {
 	client, exists := ms.sessionManager.GetSession(userID)
 	if !exists {
 		return "", fmt.Errorf("sessão não encontrada: %s", userID)

@@ -4,65 +4,20 @@ import (
 	"context"
 	"fmt"
 
-	"yourproject/internal/services/whatsapp/messaging"
 	"yourproject/internal/services/whatsapp/session"
-	"yourproject/internal/services/whatsapp/worker"
 )
 
 // Service combines session and messaging functionality
 // Implements the worker.SessionManager interface
 type Service struct {
 	sessionManager session.Manager
-	messageService *messaging.MessageService
 }
 
 // NewService creates a new unified WhatsApp service
 func NewService(sessionManager session.Manager) *Service {
 	return &Service{
 		sessionManager: sessionManager,
-		messageService: messaging.NewMessageService(sessionManager),
 	}
-}
-
-// Messaging operations - delegate to MessageService
-func (s *Service) SendText(userID, to, message string) (string, error) {
-	return s.messageService.SendText(userID, to, message)
-}
-
-func (s *Service) SendMedia(userID, to, mediaURL, mediaType, caption string) (string, error) {
-	return s.messageService.SendMedia(userID, to, mediaURL, mediaType, caption)
-}
-
-func (s *Service) SendButtons(userID, to, text, footer string, buttons []worker.ButtonData) (string, error) {
-	// Convert worker.ButtonData to messaging.ButtonData
-	msgButtons := make([]messaging.ButtonData, len(buttons))
-	for i, btn := range buttons {
-		msgButtons[i] = messaging.ButtonData{
-			ID:   btn.ID,
-			Text: btn.DisplayText, // Note: worker uses DisplayText, messaging uses Text
-		}
-	}
-	return s.messageService.SendButtons(userID, to, text, footer, msgButtons)
-}
-
-func (s *Service) SendList(userID, to, text, footer, buttonText string, sections []worker.Section) (string, error) {
-	// Convert worker.Section to messaging.Section
-	msgSections := make([]messaging.Section, len(sections))
-	for i, section := range sections {
-		rows := make([]messaging.SectionRow, len(section.Rows))
-		for j, row := range section.Rows {
-			rows[j] = messaging.SectionRow{
-				ID:          row.ID,
-				Title:       row.Title,
-				Description: row.Description,
-			}
-		}
-		msgSections[i] = messaging.Section{
-			Title: section.Title,
-			Rows:  rows,
-		}
-	}
-	return s.messageService.SendList(userID, to, text, footer, buttonText, msgSections)
 }
 
 // Session operations - delegate to SessionManager

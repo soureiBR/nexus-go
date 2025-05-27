@@ -27,7 +27,6 @@ type Coordinator struct {
 func NewCoordinator(sessionMgr session.Manager) *Coordinator {
 	coord := &Coordinator{
 		sessionManager: sessionMgr,
-		messageService: messaging.NewMessageService(sessionMgr),
 		eventHandlers:  make(map[string][]session.EventHandler),
 	}
 
@@ -39,10 +38,11 @@ func NewCoordinator(sessionMgr session.Manager) *Coordinator {
 	groupManager := &GroupManagerAdapter{sessionManager: sessionMgr}
 	coord.groupService = messaging.NewGroupService(groupManager)
 
-	// Create newsletter service with session manager
-	coord.newsletterService = messaging.NewNewsletterService(sessionMgr)
+	// Create newsletter service with NewsletterManager adapter - now follows same pattern
+	newsletterManager := &NewsletterManagerAdapter{sessionManager: sessionMgr}
+	coord.newsletterService = messaging.NewNewsletterService(newsletterManager)
 
-	// Create message service with session manager
+	// Create message service with session manager - still implements worker interface directly
 	coord.messageService = messaging.NewMessageService(sessionMgr)
 
 	// Create unified service that implements worker.SessionManager (messaging and session operations only)
@@ -51,7 +51,7 @@ func NewCoordinator(sessionMgr session.Manager) *Coordinator {
 		messageService: coord.messageService,
 	}
 
-	// Create worker pool with unified service as SessionManager, and separate services for specialized operations
+	// Create worker pool with unified service as SessionManager, and services directly
 	coord.workerPool = worker.NewWorkerPool(unifiedService, coord, worker.DefaultConfig())
 
 	return coord
@@ -86,6 +86,22 @@ func (gma *GroupManagerAdapter) GetSession(userID string) (session.GroupClient, 
 	}
 
 	// session.Client already implements session.GroupClient interface
+	return client, true
+}
+
+// NewsletterManagerAdapter adapts session.Manager to work with messaging.NewsletterService
+type NewsletterManagerAdapter struct {
+	sessionManager session.Manager
+}
+
+// GetSession implements session.NewsletterManager interface
+func (nma *NewsletterManagerAdapter) GetSession(userID string) (session.NewsletterClient, bool) {
+	client, exists := nma.sessionManager.GetSession(userID)
+	if !exists {
+		return nil, false
+	}
+
+	// session.Client already implements session.NewsletterClient interface
 	return client, true
 }
 
@@ -157,22 +173,22 @@ func (s *UnifiedWhatsAppService) GetSessionStatus(userID string) (map[string]int
 }
 
 // GetCommunityService returns the community service
-func (c *Coordinator) GetCommunityService() *messaging.CommunityService {
+func (c *Coordinator) GetCommunityService() worker.CommunityServiceInterface {
 	return c.communityService
 }
 
 // GetGroupService returns the group service (for worker pool integration)
-func (c *Coordinator) GetGroupService() *messaging.GroupService {
+func (c *Coordinator) GetGroupService() worker.GroupServiceInterface {
 	return c.groupService
 }
 
-// GetNewsletterService returns the newsletter service
-func (c *Coordinator) GetNewsletterService() *messaging.NewsletterService {
+// GetNewsletterService returns the newsletter service - now directly implements worker interface
+func (c *Coordinator) GetNewsletterService() worker.NewsletterServiceInterface {
 	return c.newsletterService
 }
 
-// GetMessageService returns the message service
-func (c *Coordinator) GetMessageService() *messaging.MessageService {
+// GetMessageService returns the message service - now directly implements worker interface
+func (c *Coordinator) GetMessageService() worker.MessageServiceInterface {
 	return c.messageService
 }
 

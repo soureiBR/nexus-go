@@ -4,12 +4,9 @@ package whatsapp
 import (
 	"context"
 	"fmt"
-	"io"
-	"net/http"
 	"time"
 
 	"go.mau.fi/whatsmeow"
-	"go.mau.fi/whatsmeow/types"
 
 	"yourproject/internal/services/whatsapp/messaging"
 	"yourproject/internal/services/whatsapp/session"
@@ -365,9 +362,10 @@ func (sm *SessionManager) ListWorkers() map[string]worker.WorkerInfo {
 	return make(map[string]worker.WorkerInfo)
 }
 
-// NewNewsletterService creates a new newsletter service
+// NewNewsletterService creates a new newsletter service using the coordinator pattern
 func NewNewsletterService(sessionManager *SessionManager) *messaging.NewsletterService {
-	return messaging.NewNewsletterService(sessionManager.sessionManager)
+	// Use the coordinator's newsletter service instead of creating a new one
+	return sessionManager.coordinator.newsletterService
 }
 
 // Messaging methods for worker integration
@@ -384,141 +382,54 @@ func (sm *SessionManager) SendMedia(userID, to, mediaURL, mediaType, caption str
 }
 
 func (sm *SessionManager) SendButtons(userID, to, text, footer string, buttons []worker.ButtonData) (string, error) {
-	// Convert worker ButtonData to messaging ButtonData
-	var msgButtons []messaging.ButtonData
-	for _, btn := range buttons {
-		msgButtons = append(msgButtons, messaging.ButtonData{
-			ID:   btn.ID,
-			Text: btn.DisplayText,
-		})
-	}
-
-	// Get the underlying message service
+	// Get the underlying message service - now uses worker types directly
 	messageService := messaging.NewMessageService(sm.sessionManager)
-	return messageService.SendButtons(userID, to, text, footer, msgButtons)
+	return messageService.SendButtons(userID, to, text, footer, buttons)
 }
 
 func (sm *SessionManager) SendList(userID, to, text, footer, buttonText string, sections []worker.Section) (string, error) {
-	// Convert worker Section to messaging Section
-	var msgSections []messaging.Section
-	for _, section := range sections {
-		var msgRows []messaging.SectionRow
-		for _, row := range section.Rows {
-			msgRows = append(msgRows, messaging.SectionRow{
-				ID:          row.ID,
-				Title:       row.Title,
-				Description: row.Description,
-			})
-		}
-		msgSections = append(msgSections, messaging.Section{
-			Title: section.Title,
-			Rows:  msgRows,
-		})
-	}
-
-	// Get the underlying message service
+	// Get the underlying message service - now uses worker types directly
 	messageService := messaging.NewMessageService(sm.sessionManager)
-	return messageService.SendList(userID, to, text, footer, buttonText, msgSections)
+	return messageService.SendList(userID, to, text, footer, buttonText, sections)
 }
 
 // Newsletter methods for worker integration
 func (sm *SessionManager) CreateChannel(userID, name, description, pictureURL string) (interface{}, error) {
-	// Get the underlying newsletter service
-	newsletterService := messaging.NewNewsletterService(sm.sessionManager)
-
-	// Download picture if URL is provided
-	var picture []byte
-	if pictureURL != "" {
-		httpClient := &http.Client{
-			Timeout: 30 * time.Second,
-		}
-		resp, err := httpClient.Get(pictureURL)
-		if err != nil {
-			return nil, fmt.Errorf("falha ao baixar imagem da URL: %w", err)
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("falha ao baixar imagem da URL: status %d", resp.StatusCode)
-		}
-
-		picture, err = io.ReadAll(resp.Body)
-		if err != nil {
-			return nil, fmt.Errorf("falha ao ler conteúdo da resposta: %w", err)
-		}
-	}
-
-	return newsletterService.CreateChannel(context.Background(), userID, name, description, picture)
+	// Use the coordinator's newsletter service directly
+	return sm.coordinator.GetNewsletterService().CreateChannel(userID, name, description, pictureURL)
 }
 
 func (sm *SessionManager) GetChannelInfo(userID, jid string) (interface{}, error) {
-	// Parse JID
-	parsedJID, err := types.ParseJID(jid)
-	if err != nil {
-		return nil, fmt.Errorf("JID inválido: %w", err)
-	}
-
-	// Get the underlying newsletter service
-	newsletterService := messaging.NewNewsletterService(sm.sessionManager)
-	return newsletterService.GetChannelInfo(context.Background(), userID, parsedJID)
+	// Use the coordinator's newsletter service directly
+	return sm.coordinator.GetNewsletterService().GetChannelInfo(userID, jid)
 }
 
 func (sm *SessionManager) GetChannelWithInvite(userID, inviteLink string) (interface{}, error) {
-	// Get the underlying newsletter service
-	newsletterService := messaging.NewNewsletterService(sm.sessionManager)
-	return newsletterService.GetChannelWithInvite(context.Background(), userID, inviteLink)
+	// Use the coordinator's newsletter service directly
+	return sm.coordinator.GetNewsletterService().GetChannelWithInvite(userID, inviteLink)
 }
 
 func (sm *SessionManager) ListMyChannels(userID string) (interface{}, error) {
-	// Get the underlying newsletter service
-	newsletterService := messaging.NewNewsletterService(sm.sessionManager)
-	return newsletterService.ListMyChannels(context.Background(), userID)
+	// Use the coordinator's newsletter service directly
+	return sm.coordinator.GetNewsletterService().ListMyChannels(userID)
 }
 
 func (sm *SessionManager) FollowChannel(userID, jid string) error {
-	// Parse JID
-	parsedJID, err := types.ParseJID(jid)
-	if err != nil {
-		return fmt.Errorf("JID inválido: %w", err)
-	}
-
-	// Get the underlying newsletter service
-	newsletterService := messaging.NewNewsletterService(sm.sessionManager)
-	return newsletterService.FollowChannel(context.Background(), userID, parsedJID)
+	// Use the coordinator's newsletter service directly
+	return sm.coordinator.GetNewsletterService().FollowChannel(userID, jid)
 }
 
 func (sm *SessionManager) UnfollowChannel(userID, jid string) error {
-	// Parse JID
-	parsedJID, err := types.ParseJID(jid)
-	if err != nil {
-		return fmt.Errorf("JID inválido: %w", err)
-	}
-
-	// Get the underlying newsletter service
-	newsletterService := messaging.NewNewsletterService(sm.sessionManager)
-	return newsletterService.UnfollowChannel(context.Background(), userID, parsedJID)
+	// Use the coordinator's newsletter service directly
+	return sm.coordinator.GetNewsletterService().UnfollowChannel(userID, jid)
 }
 
 func (sm *SessionManager) MuteChannel(userID, jid string) error {
-	// Parse JID
-	parsedJID, err := types.ParseJID(jid)
-	if err != nil {
-		return fmt.Errorf("JID inválido: %w", err)
-	}
-
-	// Get the underlying newsletter service
-	newsletterService := messaging.NewNewsletterService(sm.sessionManager)
-	return newsletterService.MuteChannel(context.Background(), userID, parsedJID)
+	// Use the coordinator's newsletter service directly
+	return sm.coordinator.GetNewsletterService().MuteChannel(userID, jid)
 }
 
 func (sm *SessionManager) UnmuteChannel(userID, jid string) error {
-	// Parse JID
-	parsedJID, err := types.ParseJID(jid)
-	if err != nil {
-		return fmt.Errorf("JID inválido: %w", err)
-	}
-
-	// Get the underlying newsletter service
-	newsletterService := messaging.NewNewsletterService(sm.sessionManager)
-	return newsletterService.UnmuteChannel(context.Background(), userID, parsedJID)
+	// Use the coordinator's newsletter service directly
+	return sm.coordinator.GetNewsletterService().UnmuteChannel(userID, jid)
 }

@@ -128,3 +128,16 @@ type GroupClient interface {
 	UpdateActivity()
 	GetUserID() string
 }
+
+// NewsletterManager defines interface for newsletter-specific operations
+type NewsletterManager interface {
+	GetSession(userID string) (NewsletterClient, bool)
+}
+
+// NewsletterClient represents a client suitable for newsletter operations
+type NewsletterClient interface {
+	GetWAClient() *whatsmeow.Client
+	IsConnected() bool
+	UpdateActivity()
+	GetUserID() string
+}

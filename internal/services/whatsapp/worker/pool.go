@@ -113,7 +113,12 @@ func NewWorkerPool(sessionMgr SessionManager, coord Coordinator, config *WorkerC
 		taskQueues:     make(map[TaskPriority]chan Task),
 		sessionManager: sessionMgr,
 		coordinator:    coord,
-		done:           make(chan struct{}),
+		// Extract services from coordinator
+		communityService:  coord.GetCommunityService(),
+		groupService:      coord.GetGroupService(),
+		messageService:    coord.GetMessageService(),
+		newsletterService: coord.GetNewsletterService(),
+		done:              make(chan struct{}),
 	}
 
 	// Inicializar filas de tarefas por prioridade
@@ -127,7 +132,7 @@ func NewWorkerPool(sessionMgr SessionManager, coord Coordinator, config *WorkerC
 }
 
 // NewWorkerPoolWithServices cria um novo pool de workers com serviços específicos
-func NewWorkerPoolWithServices(sessionMgr SessionManager, coord Coordinator, communityService CommunityServiceInterface, groupService GroupServiceInterface, newsletterService NewsletterServiceInterface, config *WorkerConfig) *WorkerPool {
+func NewWorkerPoolWithServices(sessionMgr SessionManager, coord Coordinator, communityService CommunityServiceInterface, groupService GroupServiceInterface, messageService MessageServiceInterface, newsletterService NewsletterServiceInterface, config *WorkerConfig) *WorkerPool {
 	if config == nil {
 		config = DefaultWorkerConfig()
 	}
@@ -142,6 +147,7 @@ func NewWorkerPoolWithServices(sessionMgr SessionManager, coord Coordinator, com
 		coordinator:       coord,
 		communityService:  communityService,
 		groupService:      groupService,
+		messageService:    messageService,
 		newsletterService: newsletterService,
 		done:              make(chan struct{}),
 	}
