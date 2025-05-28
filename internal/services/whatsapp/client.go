@@ -8,6 +8,7 @@ import (
 
 	"go.mau.fi/whatsmeow"
 
+	"yourproject/internal/services/rabbitmq"
 	"yourproject/internal/services/whatsapp/messaging"
 	"yourproject/internal/services/whatsapp/session"
 	"yourproject/internal/services/whatsapp/worker"
@@ -432,4 +433,9 @@ func (sm *SessionManager) MuteChannel(userID, jid string) error {
 func (sm *SessionManager) UnmuteChannel(userID, jid string) error {
 	// Use the coordinator's newsletter service directly
 	return sm.coordinator.GetNewsletterService().UnmuteChannel(userID, jid)
+}
+
+// SetEventPublisher sets the RabbitMQ event publisher
+func (sm *SessionManager) SetEventPublisher(publisher *rabbitmq.EventPublisher) {
+	sm.sessionManager.SetEventPublisher(publisher)
 }

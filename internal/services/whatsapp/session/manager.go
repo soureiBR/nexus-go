@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"yourproject/internal/services/rabbitmq"
 	"yourproject/internal/storage"
 	"yourproject/pkg/logger"
 
@@ -18,13 +19,14 @@ import (
 
 // SessionManager manages multiple WhatsApp sessions
 type SessionManager struct {
-	clients       map[string]*Client
-	clientsMutex  sync.RWMutex
-	sqlStore      *storage.SQLStore
-	eventHandlers map[string][]EventHandler
-	logger        waLog.Logger
-	cleanupTicker *time.Ticker
-	cleanupDone   chan struct{}
+	clients        map[string]*Client
+	clientsMutex   sync.RWMutex
+	sqlStore       *storage.SQLStore
+	eventHandlers  map[string][]EventHandler
+	eventPublisher *rabbitmq.EventPublisher
+	logger         waLog.Logger
+	cleanupTicker  *time.Ticker
+	cleanupDone    chan struct{}
 }
 
 // NewSessionManager creates a new session manager
@@ -634,6 +636,16 @@ func (sm *SessionManager) InitWorker(userID string) (interface{}, error) {
 	// This is a placeholder - workers can be implemented later
 	logger.Debug("Worker initialization placeholder", "user_id", userID)
 	return nil, nil
+}
+
+// SetEventPublisher sets the RabbitMQ event publisher
+func (sm *SessionManager) SetEventPublisher(publisher *rabbitmq.EventPublisher) {
+	sm.eventPublisher = publisher
+}
+
+// GetEventPublisher returns the RabbitMQ event publisher
+func (sm *SessionManager) GetEventPublisher() *rabbitmq.EventPublisher {
+	return sm.eventPublisher
 }
 
 // CommunityManagerAdapter implements session.CommunityManager interface

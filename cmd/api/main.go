@@ -17,6 +17,7 @@ import (
 	"yourproject/internal/api/middlewares"
 	"yourproject/internal/api/routes"
 	"yourproject/internal/config"
+	"yourproject/internal/services/rabbitmq"
 	"yourproject/internal/services/webhook"
 	"yourproject/internal/services/whatsapp"
 	"yourproject/internal/storage"
@@ -45,6 +46,36 @@ func main() {
 
 	// Initialize session manager
 	sessionManager := whatsapp.NewSessionManager(sqlStore)
+
+	// Initialize RabbitMQ publisher if configured
+	var eventPublisher *rabbitmq.EventPublisher
+	if cfg.RabbitMQURL != "" {
+		logger.Info("Initializing RabbitMQ publisher...", "url", cfg.RabbitMQURL)
+
+		rabbitConfig := rabbitmq.Config{
+			URL:          cfg.RabbitMQURL,
+			ExchangeName: "whatsapp.events",
+		}
+
+		eventPublisher, err = rabbitmq.NewEventPublisher(rabbitConfig)
+		if err != nil {
+			logger.Error("Failed to initialize RabbitMQ publisher", "error", err)
+			log.Printf("Warning: RabbitMQ publisher failed to initialize: %v", err)
+		} else {
+			// Set the publisher in session manager
+			sessionManager.SetEventPublisher(eventPublisher)
+
+			// Setup specific queues for WhatsApp events
+			queueSetup := rabbitmq.NewQueueSetup(eventPublisher.GetChannel(), "whatsapp.events")
+			if err := queueSetup.SetupWhatsAppQueues(); err != nil {
+				logger.Error("Failed to setup WhatsApp queues", "error", err)
+			} else {
+				logger.Info("WhatsApp event queues setup successfully")
+			}
+		}
+	} else {
+		logger.Info("RabbitMQ URL not configured, skipping RabbitMQ initialization")
+	}
 
 	// Start the coordinator system
 	logger.Info("Iniciando sistema de coordenação...")
@@ -151,6 +182,14 @@ func main() {
 	// Close session manager
 	if err := sessionManager.Close(); err != nil {
 		logger.Error("Erro ao fechar session manager", "error", err)
+	}
+
+	// Close RabbitMQ publisher if initialized
+	if eventPublisher != nil {
+		logger.Info("Closing RabbitMQ publisher...")
+		if err := eventPublisher.Close(); err != nil {
+			logger.Error("Error closing RabbitMQ publisher", "error", err)
+		}
 	}
 
 	// Shutdown server with timeout

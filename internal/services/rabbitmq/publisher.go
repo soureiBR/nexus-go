@@ -147,6 +147,11 @@ func (p *EventPublisher) PublishEvent(ctx context.Context, userID, eventType str
 	return nil
 }
 
+// GetChannel returns the RabbitMQ channel for queue setup
+func (p *EventPublisher) GetChannel() *amqp.Channel {
+	return p.channel
+}
+
 // Close shuts down the RabbitMQ connection
 func (p *EventPublisher) Close() error {
 	if p.channel != nil {
@@ -156,5 +161,130 @@ func (p *EventPublisher) Close() error {
 		p.conn.Close()
 	}
 	p.isConnected = false
+	return nil
+}
+
+// QueueSetup handles setting up specific queues for WhatsApp events
+type QueueSetup struct {
+	channel      *amqp.Channel
+	exchangeName string
+}
+
+// NewQueueSetup creates a new queue setup manager
+func NewQueueSetup(channel *amqp.Channel, exchangeName string) *QueueSetup {
+	return &QueueSetup{
+		channel:      channel,
+		exchangeName: exchangeName,
+	}
+}
+
+// SetupWhatsAppQueues creates the specific queues for all WhatsApp events
+func (qs *QueueSetup) SetupWhatsAppQueues() error {
+	queues := []struct {
+		name       string
+		routingKey string
+	}{
+		// Connection events
+		{
+			name:       "whatsapp.events.connection.update",
+			routingKey: "whatsapp.events.connection.update",
+		},
+		// Group member events
+		{
+			name:       "whatsapp.events.group.members.updated",
+			routingKey: "whatsapp.events.group.members.updated",
+		},
+		{
+			name:       "whatsapp.events.group.members.updated",
+			routingKey: "whatsapp.events.group.members.added",
+		},
+		{
+			name:       "whatsapp.events.group.members.updated",
+			routingKey: "whatsapp.events.group.members.removed",
+		},
+		{
+			name:       "whatsapp.events.group.members.updated",
+			routingKey: "whatsapp.events.group.members.promoted",
+		},
+		{
+			name:       "whatsapp.events.group.members.updated",
+			routingKey: "whatsapp.events.group.members.demoted",
+		},
+		// Group settings events
+		{
+			name:       "whatsapp.events.group.updated",
+			routingKey: "whatsapp.events.group.updated",
+		},
+		{
+			name:       "whatsapp.events.group.updated",
+			routingKey: "whatsapp.events.group.name.changed",
+		},
+		{
+			name:       "whatsapp.events.group.updated",
+			routingKey: "whatsapp.events.group.topic.changed",
+		},
+		{
+			name:       "whatsapp.events.group.updated",
+			routingKey: "whatsapp.events.group.announce.changed",
+		},
+		{
+			name:       "whatsapp.events.group.updated",
+			routingKey: "whatsapp.events.group.locked.changed",
+		},
+		{
+			name:       "whatsapp.events.group.updated",
+			routingKey: "whatsapp.events.group.ephemeral.changed",
+		},
+		{
+			name:       "whatsapp.events.group.updated",
+			routingKey: "whatsapp.events.group.membership.approval.changed",
+		},
+		{
+			name:       "whatsapp.events.group.updated",
+			routingKey: "whatsapp.events.group.deleted",
+		},
+		{
+			name:       "whatsapp.events.group.updated",
+			routingKey: "whatsapp.events.group.link.enabled",
+		},
+		{
+			name:       "whatsapp.events.group.updated",
+			routingKey: "whatsapp.events.group.link.disabled",
+		},
+		{
+			name:       "whatsapp.events.group.updated",
+			routingKey: "whatsapp.events.group.invite.link.changed",
+		},
+	}
+
+	for _, q := range queues {
+		// Declare queue
+		_, err := qs.channel.QueueDeclare(
+			q.name, // name
+			true,   // durable
+			false,  // delete when unused
+			false,  // exclusive
+			false,  // no-wait
+			nil,    // arguments
+		)
+		if err != nil {
+			return fmt.Errorf("failed to declare queue %s: %w", q.name, err)
+		}
+
+		// Bind queue to exchange
+		err = qs.channel.QueueBind(
+			q.name,          // queue name
+			q.routingKey,    // routing key
+			qs.exchangeName, // exchange
+			false,
+			nil,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to bind queue %s: %w", q.name, err)
+		}
+
+		logger.Info("Queue setup complete", "queue", q.name, "routing_key", q.routingKey)
+	}
+
 	return nil
 }
