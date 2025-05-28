@@ -32,7 +32,214 @@ func NewMessageService(sessionManager session.Manager) *MessageService {
 	}
 }
 
+// ValidateAndOrganizeRecipient validates and organizes the 'to' field based on different scenarios
+// Returns the processed JID string and any validation errors
+func (ms *MessageService) ValidateAndOrganizeRecipient(userID, to string) (string, error) {
+	// Clean the input
+	to = strings.TrimSpace(to)
+	
+	if to == "" {
+		return "", fmt.Errorf("recipient cannot be empty")
+	}
+
+	// Check if it's a special type (group, newsletter, broadcaster, etc.)
+	if strings.Contains(to, "@g.us") || 
+	   strings.Contains(to, "@newsletter") || 
+	   strings.Contains(to, "@broadcaster") ||
+	   strings.Contains(to, "@lid") {
+		// For special types, just validate the format without WhatsApp number validation
+		return ms.validateSpecialJID(to)
+	}
+
+	// If it's a phone number, validate and process it
+	if ms.isPhoneNumber(to) {
+		return ms.validateAndProcessPhoneNumber(userID, to)
+	}
+
+	// If it already contains @, try to parse as-is
+	if strings.Contains(to, "@") {
+		_, err := types.ParseJID(to)
+		if err != nil {
+			return "", fmt.Errorf("JID inválido: %w", err)
+		}
+		return to, nil
+	}
+
+	// Default: treat as phone number and add @s.whatsapp.net
+	return ms.validateAndProcessPhoneNumber(userID, to)
+}
+
+// validateSpecialJID validates JIDs for groups, newsletters, broadcasters, etc.
+func (ms *MessageService) validateSpecialJID(jid string) (string, error) {
+	// Parse to ensure it's a valid JID format
+	_, err := types.ParseJID(jid)
+	if err != nil {
+		return "", fmt.Errorf("JID especial inválido: %w", err)
+	}
+	return jid, nil
+}
+
+// isPhoneNumber checks if the input looks like a phone number
+func (ms *MessageService) isPhoneNumber(input string) bool {
+	// Remove common phone number characters
+	cleaned := strings.ReplaceAll(input, "+", "")
+	cleaned = strings.ReplaceAll(cleaned, "-", "")
+	cleaned = strings.ReplaceAll(cleaned, " ", "")
+	cleaned = strings.ReplaceAll(cleaned, "(", "")
+	cleaned = strings.ReplaceAll(cleaned, ")", "")
+	
+	// Check if all remaining characters are digits
+	for _, r := range cleaned {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	
+	// Must have at least 10 digits for a valid phone number
+	return len(cleaned) >= 10
+}
+
+// validateAndProcessPhoneNumber processes and validates phone numbers
+func (ms *MessageService) validateAndProcessPhoneNumber(userID, phoneNumber string) (string, error) {
+	// Clean the phone number
+	cleaned := ms.cleanPhoneNumber(phoneNumber)
+	
+	// Handle Brazilian numbers with the 9-digit rule
+	processed := ms.processBrazilianNumber(cleaned)
+	
+	// Check if the number exists on WhatsApp
+	exists, err := ms.checkNumberExistsOnWhatsApp(userID, processed)
+	if err != nil {
+		logger.Debug("Erro ao verificar número no WhatsApp", "number", processed, "error", err)
+		// Continue even if verification fails, but log the error
+	}
+	
+	if !exists {
+		// Try with the alternative format for Brazilian numbers
+		if strings.HasPrefix(processed, "55") && len(processed) == 13 {
+			// Try without the 9
+			alternative := ms.removeNinthDigitFromBrazilian(processed)
+			altExists, altErr := ms.checkNumberExistsOnWhatsApp(userID, alternative)
+			if altErr == nil && altExists {
+				processed = alternative
+			} else {
+				// Try adding the 9 if it doesn't have it
+				withNine := ms.addNinthDigitToBrazilian(processed)
+				if withNine != processed {
+					nineExists, nineErr := ms.checkNumberExistsOnWhatsApp(userID, withNine)
+					if nineErr == nil && nineExists {
+						processed = withNine
+					}
+				}
+			}
+		}
+	}
+	
+	// Format as WhatsApp JID
+	jid := processed + "@s.whatsapp.net"
+	
+	return jid, nil
+}
+
+// cleanPhoneNumber removes formatting characters from phone number
+func (ms *MessageService) cleanPhoneNumber(phone string) string {
+	// Remove all non-digit characters except +
+	cleaned := strings.ReplaceAll(phone, " ", "")
+	cleaned = strings.ReplaceAll(cleaned, "-", "")
+	cleaned = strings.ReplaceAll(cleaned, "(", "")
+	cleaned = strings.ReplaceAll(cleaned, ")", "")
+	cleaned = strings.ReplaceAll(cleaned, ".", "")
+	
+	// Remove + if present
+	if strings.HasPrefix(cleaned, "+") {
+		cleaned = cleaned[1:]
+	}
+	
+	return cleaned
+}
+
+// processBrazilianNumber handles Brazilian number formatting
+func (ms *MessageService) processBrazilianNumber(number string) string {
+	// If it doesn't start with country code, assume it's a local Brazilian number
+	if !strings.HasPrefix(number, "55") && len(number) <= 11 {
+		// Add Brazilian country code
+		if len(number) == 11 {
+			number = "55" + number
+		} else if len(number) == 10 {
+			// Add 55 and potentially the 9
+			number = "55" + number
+		}
+	}
+	
+	return number
+}
+
+// removeNinthDigitFromBrazilian removes the 9th digit from Brazilian mobile numbers
+func (ms *MessageService) removeNinthDigitFromBrazilian(number string) string {
+	// Brazilian format: 55 + 2-digit area code + 9-digit mobile number
+	// The 9th digit is the first digit of the mobile number part
+	if strings.HasPrefix(number, "55") && len(number) == 13 {
+		areaCode := number[2:4]
+		mobileNumber := number[4:]
+		
+		// Check if it starts with 9 (mobile number indicator)
+		if strings.HasPrefix(mobileNumber, "9") && len(mobileNumber) == 9 {
+			// Remove the first 9
+			return "55" + areaCode + mobileNumber[1:]
+		}
+	}
+	
+	return number
+}
+
+// addNinthDigitToBrazilian adds the 9th digit to Brazilian mobile numbers
+func (ms *MessageService) addNinthDigitToBrazilian(number string) string {
+	// Brazilian format: 55 + 2-digit area code + 8-digit mobile number (old format)
+	if strings.HasPrefix(number, "55") && len(number) == 12 {
+		areaCode := number[2:4]
+		mobileNumber := number[4:]
+		
+		// Check if it's a mobile number (starts with 9, 8, 7, or 6) and doesn't already have 9
+		if len(mobileNumber) == 8 && (mobileNumber[0] >= '6' && mobileNumber[0] <= '9') {
+			if !strings.HasPrefix(mobileNumber, "9") {
+				return "55" + areaCode + "9" + mobileNumber
+			}
+		}
+	}
+	
+	return number
+}
+
+// checkNumberExistsOnWhatsApp verifies if a number exists on WhatsApp
+func (ms *MessageService) checkNumberExistsOnWhatsApp(userID, number string) (bool, error) {
+	client, exists := ms.sessionManager.GetSession(userID)
+	if !exists {
+		return false, fmt.Errorf("sessão não encontrada: %s", userID)
+	}
+	
+	// Verificar se o cliente está conectado
+	if !client.Connected {
+		return false, fmt.Errorf("cliente não está conectado")
+	}
+	
+	// Format with + for WhatsApp API
+	numberWithPlus := "+" + number
+	
+	// Check status
+	responses, err := client.WAClient.IsOnWhatsApp([]string{numberWithPlus})
+	if err != nil {
+		return false, fmt.Errorf("falha ao verificar número: %w", err)
+	}
+	
+	if len(responses) == 0 {
+		return false, nil
+	}
+	
+	return responses[0].IsIn, nil
+}
+
 // ParseJID converte uma string para um JID do WhatsApp
+// Deprecated: Use ValidateAndOrganizeRecipient for better validation
 func ParseJID(jid string) (types.JID, error) {
 	if !strings.Contains(jid, "@") {
 		// Adicionar sufixo se não estiver presente
@@ -54,10 +261,16 @@ func (ms *MessageService) SendText(userID, to, message string) (string, error) {
 		return "", fmt.Errorf("sessão não encontrada: %s", userID)
 	}
 
-	// Converter para JID
-	recipient, err := ParseJID(to)
+	// Validate and organize recipient
+	validatedJID, err := ms.ValidateAndOrganizeRecipient(userID, to)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("erro ao validar destinatário: %w", err)
+	}
+
+	// Convert to JID
+	recipient, err := types.ParseJID(validatedJID)
+	if err != nil {
+		return "", fmt.Errorf("JID inválido: %w", err)
 	}
 
 	// Criar contexto com timeout
@@ -89,10 +302,16 @@ func (ms *MessageService) SendMedia(userID, to, mediaURL, mediaType, caption str
 		return "", fmt.Errorf("sessão não encontrada: %s", userID)
 	}
 
-	// Converter para JID
-	recipient, err := ParseJID(to)
+	// Validate and organize recipient
+	validatedJID, err := ms.ValidateAndOrganizeRecipient(userID, to)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("erro ao validar destinatário: %w", err)
+	}
+
+	// Convert to JID
+	recipient, err := types.ParseJID(validatedJID)
+	if err != nil {
+		return "", fmt.Errorf("JID inválido: %w", err)
 	}
 
 	// Criar contexto com timeout
@@ -251,10 +470,16 @@ func (ms *MessageService) SendButtons(userID, to, text, footer string, buttons [
 		return "", fmt.Errorf("sessão não encontrada: %s", userID)
 	}
 
-	// Converter para JID
-	recipient, err := ParseJID(to)
+	// Validate and organize recipient
+	validatedJID, err := ms.ValidateAndOrganizeRecipient(userID, to)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("erro ao validar destinatário: %w", err)
+	}
+
+	// Convert to JID
+	recipient, err := types.ParseJID(validatedJID)
+	if err != nil {
+		return "", fmt.Errorf("JID inválido: %w", err)
 	}
 
 	// Criar contexto com timeout
@@ -311,10 +536,16 @@ func (ms *MessageService) SendList(userID, to, text, footer, buttonText string, 
 		return "", fmt.Errorf("sessão não encontrada: %s", userID)
 	}
 
-	// Converter para JID
-	recipient, err := ParseJID(to)
+	// Validate and organize recipient
+	validatedJID, err := ms.ValidateAndOrganizeRecipient(userID, to)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("erro ao validar destinatário: %w", err)
+	}
+
+	// Convert to JID
+	recipient, err := types.ParseJID(validatedJID)
+	if err != nil {
+		return "", fmt.Errorf("JID inválido: %w", err)
 	}
 
 	// Criar contexto com timeout
@@ -386,10 +617,16 @@ func (ms *MessageService) SendLocation(userID, to string, latitude, longitude fl
 		return "", fmt.Errorf("sessão não encontrada: %s", userID)
 	}
 
-	// Converter para JID
-	recipient, err := ParseJID(to)
+	// Validate and organize recipient
+	validatedJID, err := ms.ValidateAndOrganizeRecipient(userID, to)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("erro ao validar destinatário: %w", err)
+	}
+
+	// Convert to JID
+	recipient, err := types.ParseJID(validatedJID)
+	if err != nil {
+		return "", fmt.Errorf("JID inválido: %w", err)
 	}
 
 	// Criar contexto com timeout
@@ -435,10 +672,16 @@ func (ms *MessageService) SendContact(userID, to string, contacts []interface{})
 		return "", fmt.Errorf("sessão não encontrada: %s", userID)
 	}
 
-	// Converter para JID
-	recipient, err := ParseJID(to)
+	// Validate and organize recipient
+	validatedJID, err := ms.ValidateAndOrganizeRecipient(userID, to)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("erro ao validar destinatário: %w", err)
+	}
+
+	// Convert to JID
+	recipient, err := types.ParseJID(validatedJID)
+	if err != nil {
+		return "", fmt.Errorf("JID inválido: %w", err)
 	}
 
 	// Criar contexto com timeout
@@ -517,10 +760,16 @@ func (ms *MessageService) SendReaction(userID, to, targetJID, targetMessageID, e
 		return "", fmt.Errorf("sessão não encontrada: %s", userID)
 	}
 
-	// Converter para JID
-	recipient, err := ParseJID(to)
+	// Validate and organize recipient
+	validatedJID, err := ms.ValidateAndOrganizeRecipient(userID, to)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("erro ao validar destinatário: %w", err)
+	}
+
+	// Convert to JID
+	recipient, err := types.ParseJID(validatedJID)
+	if err != nil {
+		return "", fmt.Errorf("JID inválido: %w", err)
 	}
 
 	// Converter target JID
@@ -578,10 +827,16 @@ func (ms *MessageService) SendPoll(userID, to, name string, options []string, se
 		return "", fmt.Errorf("sessão não encontrada: %s", userID)
 	}
 
-	// Converter para JID
-	recipient, err := ParseJID(to)
+	// Validate and organize recipient
+	validatedJID, err := ms.ValidateAndOrganizeRecipient(userID, to)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("erro ao validar destinatário: %w", err)
+	}
+
+	// Convert to JID
+	recipient, err := types.ParseJID(validatedJID)
+	if err != nil {
+		return "", fmt.Errorf("JID inválido: %w", err)
 	}
 
 	// Criar contexto com timeout
@@ -637,3 +892,143 @@ func (ms *MessageService) SendPoll(userID, to, name string, options []string, se
 
 	return msg.ID, nil
 }
+
+// ValidateRecipientFormat validates recipient format without WhatsApp connectivity check
+// This is useful for testing and validation without requiring an active session
+func ValidateRecipientFormat(to string) (string, error) {
+	// Clean the input
+	to = strings.TrimSpace(to)
+	
+	if to == "" {
+		return "", fmt.Errorf("recipient cannot be empty")
+	}
+
+	// Check if it's a special type (group, newsletter, broadcaster, etc.)
+	if strings.Contains(to, "@g.us") || 
+	   strings.Contains(to, "@newsletter") || 
+	   strings.Contains(to, "@broadcaster") ||
+	   strings.Contains(to, "@lid") {
+		// For special types, just validate the format
+		_, err := types.ParseJID(to)
+		if err != nil {
+			return "", fmt.Errorf("JID especial inválido: %w", err)
+		}
+		return to, nil
+	}
+
+	// If it's a phone number, process it
+	if isPhoneNumberFormat(to) {
+		processed := processPhoneNumberFormat(to)
+		return processed + "@s.whatsapp.net", nil
+	}
+
+	// If it already contains @, try to parse as-is
+	if strings.Contains(to, "@") {
+		_, err := types.ParseJID(to)
+		if err != nil {
+			return "", fmt.Errorf("JID inválido: %w", err)
+		}
+		return to, nil
+	}
+
+	// Default: treat as phone number and add @s.whatsapp.net
+	processed := processPhoneNumberFormat(to)
+	return processed + "@s.whatsapp.net", nil
+}
+
+// isPhoneNumberFormat checks if the input looks like a phone number (standalone version)
+func isPhoneNumberFormat(input string) bool {
+	// Remove common phone number characters
+	cleaned := strings.ReplaceAll(input, "+", "")
+	cleaned = strings.ReplaceAll(cleaned, "-", "")
+	cleaned = strings.ReplaceAll(cleaned, " ", "")
+	cleaned = strings.ReplaceAll(cleaned, "(", "")
+	cleaned = strings.ReplaceAll(cleaned, ")", "")
+	
+	// Check if all remaining characters are digits
+	for _, r := range cleaned {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	
+	// Must have at least 10 digits for a valid phone number
+	return len(cleaned) >= 10
+}
+
+// processPhoneNumberFormat processes phone number format (standalone version)
+func processPhoneNumberFormat(phoneNumber string) string {
+	// Clean the phone number
+	cleaned := cleanPhoneNumberFormat(phoneNumber)
+	
+	// Handle Brazilian numbers with the 9-digit rule
+	processed := processBrazilianNumberFormat(cleaned)
+	
+	return processed
+}
+
+// cleanPhoneNumberFormat removes formatting characters from phone number (standalone version)
+func cleanPhoneNumberFormat(phone string) string {
+	// Remove all non-digit characters except +
+	cleaned := strings.ReplaceAll(phone, " ", "")
+	cleaned = strings.ReplaceAll(cleaned, "-", "")
+	cleaned = strings.ReplaceAll(cleaned, "(", "")
+	cleaned = strings.ReplaceAll(cleaned, ")", "")
+	cleaned = strings.ReplaceAll(cleaned, ".", "")
+	
+	// Remove + if present
+	if strings.HasPrefix(cleaned, "+") {
+		cleaned = cleaned[1:]
+	}
+	
+	return cleaned
+}
+
+// processBrazilianNumberFormat handles Brazilian number formatting (standalone version)
+func processBrazilianNumberFormat(number string) string {
+	// If it doesn't start with country code, assume it's a local Brazilian number
+	if !strings.HasPrefix(number, "55") && len(number) <= 11 {
+		// Add Brazilian country code
+		if len(number) == 11 {
+			number = "55" + number
+		} else if len(number) == 10 {
+			// Add 55 and potentially the 9
+			number = "55" + number
+		}
+	}
+	
+	return number
+}
+
+/*
+Example usage of ValidateAndOrganizeRecipient:
+
+1. Group messages:
+   input: "120363123456789012@g.us"
+   output: "120363123456789012@g.us" (validated as-is)
+
+2. Newsletter:
+   input: "123456789@newsletter"
+   output: "123456789@newsletter" (validated as-is)
+
+3. Broadcaster:
+   input: "123456789@broadcaster"
+   output: "123456789@broadcaster" (validated as-is)
+
+4. Brazilian phone numbers:
+   input: "5511988376411" or "+5511988376411" or "11988376411"
+   output: "5511988376411@s.whatsapp.net" or "5511883756411@s.whatsapp.net" (depending on WhatsApp validation)
+   
+   The function will try both formats:
+   - With 9: 5511988376411
+   - Without 9: 5511883756411
+   And use the one that exists on WhatsApp
+
+5. International numbers:
+   input: "+1234567890" or "1234567890"
+   output: "1234567890@s.whatsapp.net" (after WhatsApp validation)
+
+6. Already formatted JIDs:
+   input: "5511988376411@s.whatsapp.net"
+   output: "5511988376411@s.whatsapp.net" (validated as-is)
+*/
