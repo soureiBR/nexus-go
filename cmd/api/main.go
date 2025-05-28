@@ -18,6 +18,7 @@ import (
 	"yourproject/internal/api/routes"
 	"yourproject/internal/config"
 	"yourproject/internal/services/rabbitmq"
+	"yourproject/internal/services/rabbitmq/consumers"
 	"yourproject/internal/services/webhook"
 	"yourproject/internal/services/whatsapp"
 	"yourproject/internal/storage"
@@ -49,6 +50,7 @@ func main() {
 
 	// Initialize RabbitMQ publisher if configured
 	var eventPublisher *rabbitmq.EventPublisher
+	var consumerManager *consumers.ConsumerManager
 	if cfg.RabbitMQURL != "" {
 		logger.Info("Initializing RabbitMQ publisher...", "url", cfg.RabbitMQURL)
 
@@ -72,6 +74,17 @@ func main() {
 			} else {
 				logger.Info("WhatsApp event queues setup successfully")
 			}
+
+			// Initialize consumer manager
+			logger.Info("Initializing RabbitMQ consumer manager...")
+			consumerManagerConfig := consumers.ConsumerManagerConfig{
+				RabbitMQURL:    cfg.RabbitMQURL,
+				ExchangeName:   "whatsapp.events",
+				SessionManager: nil, // Will be set after sessionManager is ready
+				Publisher:      eventPublisher,
+			}
+			consumerManager = consumers.NewConsumerManager(consumerManagerConfig)
+			logger.Info("Consumer manager initialized successfully")
 		}
 	} else {
 		logger.Info("RabbitMQ URL not configured, skipping RabbitMQ initialization")
@@ -98,6 +111,33 @@ func main() {
 		log.Printf("Warning: Some workers failed to initialize: %v", err)
 	} else {
 		logger.Info("Workers inicializados com sucesso para todas as sessões")
+	}
+
+	// Initialize RabbitMQ consumers if available
+	if consumerManager != nil {
+		logger.Info("Registering and starting RabbitMQ consumers...")
+
+		// Update consumer manager config with the session manager (for worker-based consumers)
+		consumerManagerConfig := consumers.ConsumerManagerConfig{
+			RabbitMQURL:    cfg.RabbitMQURL,
+			ExchangeName:   "whatsapp.events",
+			SessionManager: sessionManager,
+			Publisher:      eventPublisher,
+		}
+
+		// Register send message consumer
+		if err := consumerManager.RegisterSendMessageConsumer(consumerManagerConfig); err != nil {
+			logger.Error("Failed to register send message consumer", "error", err)
+		} else {
+			logger.Info("Send message consumer registered successfully")
+		}
+
+		// Start all consumers
+		if err := consumerManager.StartAll(); err != nil {
+			logger.Error("Failed to start consumers", "error", err)
+		} else {
+			logger.Info("All consumers started successfully")
+		}
 	}
 
 	// Start periodic cleanup for inactive sessions (every 30 minutes, remove sessions inactive for 24 hours)
@@ -171,6 +211,12 @@ func main() {
 	logger.Info("Parando sistema de coordenação...")
 	if err := sessionManager.StopCoordinator(); err != nil {
 		logger.Error("Erro ao parar coordinator", "error", err)
+	}
+
+	// Stop RabbitMQ consumers if initialized
+	if consumerManager != nil {
+		logger.Info("Stopping RabbitMQ consumers...")
+		consumerManager.StopAll()
 	}
 
 	// Stop periodic cleanup

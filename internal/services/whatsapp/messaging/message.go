@@ -14,6 +14,7 @@ import (
 	"yourproject/pkg/logger"
 
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"google.golang.org/protobuf/proto"
@@ -374,6 +375,265 @@ func (ms *MessageService) SendList(userID, to, text, footer, buttonText string, 
 
 	// Log
 	logger.Debug("Mensagem de lista enviada", "user_id", userID, "to", to, "message_id", msg.ID)
+
+	return msg.ID, nil
+}
+
+// SendLocation envia uma mensagem de localização
+func (ms *MessageService) SendLocation(userID, to string, latitude, longitude float64, name, address *string) (string, error) {
+	client, exists := ms.sessionManager.GetSession(userID)
+	if !exists {
+		return "", fmt.Errorf("sessão não encontrada: %s", userID)
+	}
+
+	// Converter para JID
+	recipient, err := ParseJID(to)
+	if err != nil {
+		return "", err
+	}
+
+	// Criar contexto com timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Criar mensagem de localização
+	locationMsg := &waE2E.LocationMessage{
+		DegreesLatitude:  proto.Float64(latitude),
+		DegreesLongitude: proto.Float64(longitude),
+	}
+
+	if name != nil {
+		locationMsg.Name = proto.String(*name)
+	}
+
+	if address != nil {
+		locationMsg.Address = proto.String(*address)
+	}
+
+	// Enviar mensagem de localização
+	msg, err := client.WAClient.SendMessage(ctx, recipient, &waE2E.Message{
+		LocationMessage: locationMsg,
+	})
+
+	if err != nil {
+		return "", fmt.Errorf("falha ao enviar mensagem de localização: %w", err)
+	}
+
+	// Atualizar última atividade
+	client.LastActive = time.Now()
+
+	// Log
+	logger.Debug("Mensagem de localização enviada", "user_id", userID, "to", to, "message_id", msg.ID)
+
+	return msg.ID, nil
+}
+
+// SendContact envia uma mensagem de contato
+func (ms *MessageService) SendContact(userID, to string, contacts []interface{}) (string, error) {
+	client, exists := ms.sessionManager.GetSession(userID)
+	if !exists {
+		return "", fmt.Errorf("sessão não encontrada: %s", userID)
+	}
+
+	// Converter para JID
+	recipient, err := ParseJID(to)
+	if err != nil {
+		return "", err
+	}
+
+	// Criar contexto com timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Criar mensagem de contatos
+	var contactMessages []*waE2E.ContactMessage
+	for _, contact := range contacts {
+		// Convert interface{} to map for processing
+		if contactMap, ok := contact.(map[string]interface{}); ok {
+			contactMsg := &waE2E.ContactMessage{}
+
+			if displayName, ok := contactMap["displayName"].(string); ok {
+				contactMsg.DisplayName = proto.String(displayName)
+			}
+
+			if vcard, ok := contactMap["vcard"].(string); ok {
+				contactMsg.Vcard = proto.String(vcard)
+			}
+
+			contactMessages = append(contactMessages, contactMsg)
+		}
+	}
+
+	if len(contactMessages) == 0 {
+		return "", fmt.Errorf("no valid contacts found")
+	}
+
+	// Para múltiplos contatos, use ContactsArrayMessage
+	if len(contactMessages) > 1 {
+		contactsArrayMsg := &waE2E.ContactsArrayMessage{
+			DisplayName: proto.String("Shared Contacts"),
+			Contacts:    contactMessages,
+		}
+
+		msg, err := client.WAClient.SendMessage(ctx, recipient, &waE2E.Message{
+			ContactsArrayMessage: contactsArrayMsg,
+		})
+
+		if err != nil {
+			return "", fmt.Errorf("falha ao enviar mensagem de contatos: %w", err)
+		}
+
+		// Atualizar última atividade
+		client.LastActive = time.Now()
+
+		// Log
+		logger.Debug("Mensagem de contatos enviada", "user_id", userID, "to", to, "message_id", msg.ID)
+
+		return msg.ID, nil
+	}
+
+	// Para um único contato, use ContactMessage
+	msg, err := client.WAClient.SendMessage(ctx, recipient, &waE2E.Message{
+		ContactMessage: contactMessages[0],
+	})
+
+	if err != nil {
+		return "", fmt.Errorf("falha ao enviar mensagem de contato: %w", err)
+	}
+
+	// Atualizar última atividade
+	client.LastActive = time.Now()
+
+	// Log
+	logger.Debug("Mensagem de contato enviada", "user_id", userID, "to", to, "message_id", msg.ID)
+
+	return msg.ID, nil
+}
+
+// SendReaction envia uma reação a uma mensagem
+func (ms *MessageService) SendReaction(userID, to, targetJID, targetMessageID, emoji string, fromMe bool, participant *string) (string, error) {
+	client, exists := ms.sessionManager.GetSession(userID)
+	if !exists {
+		return "", fmt.Errorf("sessão não encontrada: %s", userID)
+	}
+
+	// Converter para JID
+	recipient, err := ParseJID(to)
+	if err != nil {
+		return "", err
+	}
+
+	// Converter target JID
+	targetJIDParsed, err := ParseJID(targetJID)
+	if err != nil {
+		return "", err
+	}
+
+	// Criar contexto com timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Create the message key for the target message
+	messageKey := &waCommon.MessageKey{
+		RemoteJID: proto.String(targetJIDParsed.String()),
+		ID:        proto.String(targetMessageID),
+		FromMe:    proto.Bool(fromMe),
+	}
+
+	if participant != nil {
+		participantJID, err := ParseJID(*participant)
+		if err != nil {
+			return "", err
+		}
+		messageKey.Participant = proto.String(participantJID.String())
+	}
+
+	// Send reaction using whatsmeow's SendMessage with ReactionMessage
+	reactionMsg := &waE2E.ReactionMessage{
+		Key:  messageKey,
+		Text: proto.String(emoji),
+	}
+
+	msg, err := client.WAClient.SendMessage(ctx, recipient, &waE2E.Message{
+		ReactionMessage: reactionMsg,
+	})
+
+	if err != nil {
+		return "", fmt.Errorf("falha ao enviar reação: %w", err)
+	}
+
+	// Atualizar última atividade
+	client.LastActive = time.Now()
+
+	// Log
+	logger.Debug("Reação enviada", "user_id", userID, "to", to, "emoji", emoji, "message_id", msg.ID)
+
+	return msg.ID, nil
+}
+
+// SendPoll envia uma mensagem de enquete
+func (ms *MessageService) SendPoll(userID, to, name string, options []string, selectableCount int) (string, error) {
+	client, exists := ms.sessionManager.GetSession(userID)
+	if !exists {
+		return "", fmt.Errorf("sessão não encontrada: %s", userID)
+	}
+
+	// Converter para JID
+	recipient, err := ParseJID(to)
+	if err != nil {
+		return "", err
+	}
+
+	// Criar contexto com timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Verificar se há opções suficientes
+	if len(options) < 2 {
+		return "", fmt.Errorf("poll must have at least 2 options")
+	}
+
+	if len(options) > 12 {
+		return "", fmt.Errorf("poll cannot have more than 12 options")
+	}
+
+	// Validar selectableCount
+	if selectableCount < 1 {
+		selectableCount = 1
+	}
+	if selectableCount > len(options) {
+		selectableCount = len(options)
+	}
+
+	// Criar opções da enquete
+	var pollOptions []*waE2E.PollCreationMessage_Option
+	for _, option := range options {
+		pollOptions = append(pollOptions, &waE2E.PollCreationMessage_Option{
+			OptionName: proto.String(option),
+		})
+	}
+
+	// Criar mensagem de enquete
+	pollMsg := &waE2E.PollCreationMessage{
+		Name:                   proto.String(name),
+		Options:                pollOptions,
+		SelectableOptionsCount: proto.Uint32(uint32(selectableCount)),
+	}
+
+	// Enviar enquete
+	msg, err := client.WAClient.SendMessage(ctx, recipient, &waE2E.Message{
+		PollCreationMessage: pollMsg,
+	})
+
+	if err != nil {
+		return "", fmt.Errorf("falha ao enviar enquete: %w", err)
+	}
+
+	// Atualizar última atividade
+	client.LastActive = time.Now()
+
+	// Log
+	logger.Debug("Enquete enviada", "user_id", userID, "to", to, "name", name, "options_count", len(options), "message_id", msg.ID)
 
 	return msg.ID, nil
 }

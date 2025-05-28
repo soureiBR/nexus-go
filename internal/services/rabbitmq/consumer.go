@@ -203,9 +203,8 @@ func (c *EventConsumer) Start(ctx context.Context) error {
 		return fmt.Errorf("falha ao iniciar consumidor: %w", err)
 	}
 
-	// Contexto para graceful shutdown
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	// Use the provided context directly - don't create a new one with defer cancel
+	// The caller is responsible for context lifecycle management
 
 	// Capturar sinais para shutdown
 	go func() {
@@ -214,7 +213,7 @@ func (c *EventConsumer) Start(ctx context.Context) error {
 		select {
 		case <-sigChan:
 			logger.Info("Sinal de shutdown recebido")
-			cancel()
+			// The caller should handle this through their context
 		case <-ctx.Done():
 			// Contexto cancelado em outro lugar
 		}

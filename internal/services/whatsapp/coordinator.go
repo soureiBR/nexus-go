@@ -192,6 +192,11 @@ func (c *Coordinator) GetMessageService() worker.MessageServiceInterface {
 	return c.messageService
 }
 
+// GetConcreteMessageService returns the concrete message service instance
+func (c *Coordinator) GetConcreteMessageService() *messaging.MessageService {
+	return c.messageService
+}
+
 // GetWorkerPool returns the worker pool
 func (c *Coordinator) GetWorkerPool() *worker.WorkerPool {
 	return c.workerPool
