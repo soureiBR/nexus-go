@@ -203,6 +203,8 @@ func (w *Worker) processTask(task Task) {
 		response = w.handleSendButtons(task.Payload.(SendButtonsPayload))
 	case CmdSendList:
 		response = w.handleSendList(task.Payload.(SendListPayload))
+	case CmdCheckNumber:
+		response = w.handleCheckNumber(task.Payload.(CheckNumberPayload))
 	case CmdConnect:
 		response = w.handleConnect()
 	case CmdDisconnect:
@@ -355,6 +357,14 @@ func (w *Worker) handleSendList(payload SendListPayload) CommandResponse {
 		return CommandResponse{Error: fmt.Errorf("falha ao enviar lista: %w", err)}
 	}
 	return CommandResponse{Data: msgID}
+}
+
+func (w *Worker) handleCheckNumber(payload CheckNumberPayload) CommandResponse {
+	exists, err := w.messageService.CheckNumberExistsOnWhatsApp(w.UserID, payload.Number)
+	if err != nil {
+		return CommandResponse{Error: fmt.Errorf("falha ao verificar número: %w", err)}
+	}
+	return CommandResponse{Data: exists}
 }
 
 func (w *Worker) handleConnect() CommandResponse {

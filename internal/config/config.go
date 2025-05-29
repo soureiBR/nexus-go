@@ -25,7 +25,7 @@ func LoadConfig() Config {
 	return Config{
 		Port:        port,
 		APIKey:      os.Getenv("API_KEY"),
-		LogLevel:    getEnvOrDefault("LOG_LEVEL", "info"),
+		LogLevel:    getEnvOrDefault("LOG_LEVEL", "debug"),
 		WebhookURL:  os.Getenv("WEBHOOK_URL"),
 		DBPath:      getEnvOrDefault("DB_PATH", "./data/whatsapp.db"),
 		RabbitMQURL: getEnvOrDefault("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"),

@@ -45,6 +45,16 @@ type ListMessageRequest struct {
 	Sections   []worker.Section `json:"sections" binding:"required,min=1"`
 }
 
+type CheckNumberRequest struct {
+	Number string `json:"number" binding:"required"`
+}
+
+type CheckNumberResponse struct {
+	Number string `json:"number"`
+	Exists bool   `json:"exists"`
+	Status string `json:"status"`
+}
+
 type MessageResponse struct {
 	MessageID string `json:"message_id"`
 	Status    string `json:"status"`
@@ -353,4 +363,59 @@ func (h *MessageHandler) SendList(c *gin.Context) {
 func (h *MessageHandler) SendTemplate(c *gin.Context) {
 	// Implementação semelhante às anteriores para envio de templates
 	c.JSON(http.StatusNotImplemented, gin.H{"error": "Funcionalidade em desenvolvimento"})
+}
+
+// CheckNumber verifica se um número existe no WhatsApp
+func (h *MessageHandler) CheckNumber(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
+		return
+	}
+
+	userIDStr := userID.(string)
+
+	var req CheckNumberRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
+		return
+	}
+
+	// Verificar se a sessão existe
+	client, exists := h.sessionManager.GetSession(userIDStr)
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Sessão não encontrada"})
+		return
+	}
+
+	// Verificar se o cliente está conectado
+	if !client.Connected {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Cliente não está conectado"})
+		return
+	}
+
+	// Create payload
+	payload := worker.CheckNumberPayload{
+		Number: req.Number,
+	}
+
+	// Submit task to worker
+	result, err := h.submitWorkerTask(userIDStr, worker.CmdCheckNumber, payload)
+	if err != nil {
+		logger.Error("Falha ao verificar número", "error", err, "user_id", userIDStr, "number", req.Number)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao verificar número", "details": err.Error()})
+		return
+	}
+
+	// Extract result
+	exists = false
+	if resultBool, ok := result.(bool); ok {
+		exists = resultBool
+	}
+
+	c.JSON(http.StatusOK, CheckNumberResponse{
+		Number: req.Number,
+		Exists: exists,
+		Status: "checked",
+	})
 }

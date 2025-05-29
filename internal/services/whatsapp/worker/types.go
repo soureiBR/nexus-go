@@ -102,6 +102,7 @@ const (
 	CmdSendMedia   CommandType = "send_media"
 	CmdSendButtons CommandType = "send_buttons"
 	CmdSendList    CommandType = "send_list"
+	CmdCheckNumber CommandType = "check_number"
 
 	// Community commands
 	CmdCreateCommunity            CommandType = "create_community"
@@ -310,6 +311,7 @@ type MessageServiceInterface interface {
 	SendMedia(userID, to, mediaURL, mediaType, caption string) (string, error)
 	SendButtons(userID, to, text, footer string, buttons []ButtonData) (string, error)
 	SendList(userID, to, text, footer, buttonText string, sections []Section) (string, error)
+	CheckNumberExistsOnWhatsApp(userID, number string) (bool, error)
 }
 
 // NewsletterServiceInterface defines newsletter operations interface

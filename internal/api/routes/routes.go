@@ -46,6 +46,7 @@ func SetupRoutes(
 		message.POST("/buttons", messageHandler.SendButtons)
 		message.POST("/list", messageHandler.SendList)
 		message.POST("/template", messageHandler.SendTemplate)
+		message.POST("/check-number", messageHandler.CheckNumber)
 	}
 
 	// Rotas de grupos

@@ -30,6 +30,10 @@ type SendListPayload struct {
 	Sections   []Section `json:"sections"`
 }
 
+type CheckNumberPayload struct {
+	Number string `json:"number"`
+}
+
 // ButtonData represents a button in a message
 type ButtonData struct {
 	ID          string `json:"id"`

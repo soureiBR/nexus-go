@@ -248,7 +248,7 @@ func (ms *MessageService) checkNumberExistsOnWhatsApp(userID, number string) (bo
 	}
 
 	// Format with + for WhatsApp API
-	numberWithPlus := "+" + number
+	numberWithPlus := "+" + number + "@s.whatsapp.net"
 
 	// Check status
 	responses, err := client.WAClient.IsOnWhatsApp([]string{numberWithPlus})
@@ -261,6 +261,11 @@ func (ms *MessageService) checkNumberExistsOnWhatsApp(userID, number string) (bo
 	}
 
 	return responses[0].IsIn, nil
+}
+
+// CheckNumberExistsOnWhatsApp verifies if a number exists on WhatsApp (public method)
+func (ms *MessageService) CheckNumberExistsOnWhatsApp(userID, number string) (bool, error) {
+	return ms.checkNumberExistsOnWhatsApp(userID, number)
 }
 
 // ParseJID converte uma string para um JID do WhatsApp
@@ -1065,36 +1070,3 @@ func isBrazilianAreaCode(number string) bool {
 
 	return false
 }
-
-/*
-Example usage of ValidateAndOrganizeRecipient:
-
-1. Group messages:
-   input: "120363123456789012@g.us"
-   output: "120363123456789012@g.us" (validated as-is)
-
-2. Newsletter:
-   input: "123456789@newsletter"
-   output: "123456789@newsletter" (validated as-is)
-
-3. Broadcaster:
-   input: "123456789@broadcaster"
-   output: "123456789@broadcaster" (validated as-is)
-
-4. Brazilian phone numbers:
-   input: "5511988376411" or "+5511988376411" or "11988376411"
-   output: "5511988376411@s.whatsapp.net" or "5511883756411@s.whatsapp.net" (depending on WhatsApp validation)
-
-   The function will try both formats:
-   - With 9: 5511988376411
-   - Without 9: 5511883756411
-   And use the one that exists on WhatsApp
-
-5. International numbers:
-   input: "+1234567890" or "1234567890"
-   output: "1234567890@s.whatsapp.net" (after WhatsApp validation)
-
-6. Already formatted JIDs:
-   input: "5511988376411@s.whatsapp.net"
-   output: "5511988376411@s.whatsapp.net" (validated as-is)
-*/
