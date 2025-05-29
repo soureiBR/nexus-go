@@ -37,16 +37,16 @@ func NewMessageService(sessionManager session.Manager) *MessageService {
 func (ms *MessageService) ValidateAndOrganizeRecipient(userID, to string) (string, error) {
 	// Clean the input
 	to = strings.TrimSpace(to)
-	
+
 	if to == "" {
 		return "", fmt.Errorf("recipient cannot be empty")
 	}
 
 	// Check if it's a special type (group, newsletter, broadcaster, etc.)
-	if strings.Contains(to, "@g.us") || 
-	   strings.Contains(to, "@newsletter") || 
-	   strings.Contains(to, "@broadcaster") ||
-	   strings.Contains(to, "@lid") {
+	if strings.Contains(to, "@g.us") ||
+		strings.Contains(to, "@newsletter") ||
+		strings.Contains(to, "@broadcaster") ||
+		strings.Contains(to, "@lid") {
 		// For special types, just validate the format without WhatsApp number validation
 		return ms.validateSpecialJID(to)
 	}
@@ -87,14 +87,14 @@ func (ms *MessageService) isPhoneNumber(input string) bool {
 	cleaned = strings.ReplaceAll(cleaned, " ", "")
 	cleaned = strings.ReplaceAll(cleaned, "(", "")
 	cleaned = strings.ReplaceAll(cleaned, ")", "")
-	
+
 	// Check if all remaining characters are digits
 	for _, r := range cleaned {
 		if r < '0' || r > '9' {
 			return false
 		}
 	}
-	
+
 	// Must have at least 10 digits for a valid phone number
 	return len(cleaned) >= 10
 }
@@ -103,41 +103,68 @@ func (ms *MessageService) isPhoneNumber(input string) bool {
 func (ms *MessageService) validateAndProcessPhoneNumber(userID, phoneNumber string) (string, error) {
 	// Clean the phone number
 	cleaned := ms.cleanPhoneNumber(phoneNumber)
-	
+
 	// Handle Brazilian numbers with the 9-digit rule
 	processed := ms.processBrazilianNumber(cleaned)
-	
+
 	// Check if the number exists on WhatsApp
 	exists, err := ms.checkNumberExistsOnWhatsApp(userID, processed)
 	if err != nil {
 		logger.Debug("Erro ao verificar número no WhatsApp", "number", processed, "error", err)
 		// Continue even if verification fails, but log the error
 	}
-	
+
 	if !exists {
 		// Try with the alternative format for Brazilian numbers
-		if strings.HasPrefix(processed, "55") && len(processed) == 13 {
-			// Try without the 9
-			alternative := ms.removeNinthDigitFromBrazilian(processed)
-			altExists, altErr := ms.checkNumberExistsOnWhatsApp(userID, alternative)
-			if altErr == nil && altExists {
-				processed = alternative
-			} else {
-				// Try adding the 9 if it doesn't have it
-				withNine := ms.addNinthDigitToBrazilian(processed)
-				if withNine != processed {
-					nineExists, nineErr := ms.checkNumberExistsOnWhatsApp(userID, withNine)
-					if nineErr == nil && nineExists {
-						processed = withNine
+		if strings.HasPrefix(processed, "55") && len(processed) >= 12 {
+			var alternatives []string
+
+			if len(processed) == 13 {
+				// 13 digits: try removing the 9
+				alternative := ms.removeNinthDigitFromBrazilian(processed)
+				if alternative != processed {
+					alternatives = append(alternatives, alternative)
+				}
+			} else if len(processed) == 12 {
+				// 12 digits: try adding the 9
+				alternative := ms.addNinthDigitToBrazilian(processed)
+				if alternative != processed {
+					alternatives = append(alternatives, alternative)
+				}
+			} else if len(processed) == 11 {
+				// 11 digits: This could be a landline or mobile without country code added incorrectly
+				// Try to re-process as 9-digit number by adding country code
+				withoutCountryCode := processed[2:] // Remove "55"
+				if len(withoutCountryCode) == 9 {
+					// Add 55 back and try both with and without 9
+					alternatives = append(alternatives, "55"+withoutCountryCode) // As-is
+
+					// Try adding 9 if it doesn't start with 9
+					if !strings.HasPrefix(withoutCountryCode, "9") {
+						alternatives = append(alternatives, "55"+withoutCountryCode[:2]+"9"+withoutCountryCode[2:])
 					}
+
+					// Try removing 9 if it starts with 9
+					if strings.HasPrefix(withoutCountryCode, "9") && len(withoutCountryCode) == 9 {
+						alternatives = append(alternatives, "55"+withoutCountryCode[1:])
+					}
+				}
+			}
+
+			// Test each alternative
+			for _, alt := range alternatives {
+				altExists, altErr := ms.checkNumberExistsOnWhatsApp(userID, alt)
+				if altErr == nil && altExists {
+					processed = alt
+					break
 				}
 			}
 		}
 	}
-	
+
 	// Format as WhatsApp JID
 	jid := processed + "@s.whatsapp.net"
-	
+
 	return jid, nil
 }
 
@@ -149,28 +176,26 @@ func (ms *MessageService) cleanPhoneNumber(phone string) string {
 	cleaned = strings.ReplaceAll(cleaned, "(", "")
 	cleaned = strings.ReplaceAll(cleaned, ")", "")
 	cleaned = strings.ReplaceAll(cleaned, ".", "")
-	
+
 	// Remove + if present
-	if strings.HasPrefix(cleaned, "+") {
-		cleaned = cleaned[1:]
-	}
-	
+	cleaned = strings.TrimPrefix(cleaned, "+")
+
 	return cleaned
 }
 
 // processBrazilianNumber handles Brazilian number formatting
 func (ms *MessageService) processBrazilianNumber(number string) string {
-	// If it doesn't start with country code, assume it's a local Brazilian number
-	if !strings.HasPrefix(number, "55") && len(number) <= 11 {
-		// Add Brazilian country code
-		if len(number) == 11 {
-			number = "55" + number
-		} else if len(number) == 10 {
-			// Add 55 and potentially the 9
-			number = "55" + number
+	// If it doesn't start with country code, check if it's a Brazilian local number
+	if !strings.HasPrefix(number, "55") && len(number) >= 10 && len(number) <= 11 {
+		// Check if it looks like a Brazilian local number by area code
+		if isBrazilianAreaCode(number) {
+			// Add Brazilian country code
+			if len(number) == 11 || len(number) == 10 {
+				number = "55" + number
+			}
 		}
 	}
-	
+
 	return number
 }
 
@@ -181,14 +206,14 @@ func (ms *MessageService) removeNinthDigitFromBrazilian(number string) string {
 	if strings.HasPrefix(number, "55") && len(number) == 13 {
 		areaCode := number[2:4]
 		mobileNumber := number[4:]
-		
+
 		// Check if it starts with 9 (mobile number indicator)
 		if strings.HasPrefix(mobileNumber, "9") && len(mobileNumber) == 9 {
 			// Remove the first 9
 			return "55" + areaCode + mobileNumber[1:]
 		}
 	}
-	
+
 	return number
 }
 
@@ -198,7 +223,7 @@ func (ms *MessageService) addNinthDigitToBrazilian(number string) string {
 	if strings.HasPrefix(number, "55") && len(number) == 12 {
 		areaCode := number[2:4]
 		mobileNumber := number[4:]
-		
+
 		// Check if it's a mobile number (starts with 9, 8, 7, or 6) and doesn't already have 9
 		if len(mobileNumber) == 8 && (mobileNumber[0] >= '6' && mobileNumber[0] <= '9') {
 			if !strings.HasPrefix(mobileNumber, "9") {
@@ -206,7 +231,7 @@ func (ms *MessageService) addNinthDigitToBrazilian(number string) string {
 			}
 		}
 	}
-	
+
 	return number
 }
 
@@ -216,25 +241,25 @@ func (ms *MessageService) checkNumberExistsOnWhatsApp(userID, number string) (bo
 	if !exists {
 		return false, fmt.Errorf("sessão não encontrada: %s", userID)
 	}
-	
+
 	// Verificar se o cliente está conectado
 	if !client.Connected {
 		return false, fmt.Errorf("cliente não está conectado")
 	}
-	
+
 	// Format with + for WhatsApp API
 	numberWithPlus := "+" + number
-	
+
 	// Check status
 	responses, err := client.WAClient.IsOnWhatsApp([]string{numberWithPlus})
 	if err != nil {
 		return false, fmt.Errorf("falha ao verificar número: %w", err)
 	}
-	
+
 	if len(responses) == 0 {
 		return false, nil
 	}
-	
+
 	return responses[0].IsIn, nil
 }
 
@@ -898,16 +923,16 @@ func (ms *MessageService) SendPoll(userID, to, name string, options []string, se
 func ValidateRecipientFormat(to string) (string, error) {
 	// Clean the input
 	to = strings.TrimSpace(to)
-	
+
 	if to == "" {
 		return "", fmt.Errorf("recipient cannot be empty")
 	}
 
 	// Check if it's a special type (group, newsletter, broadcaster, etc.)
-	if strings.Contains(to, "@g.us") || 
-	   strings.Contains(to, "@newsletter") || 
-	   strings.Contains(to, "@broadcaster") ||
-	   strings.Contains(to, "@lid") {
+	if strings.Contains(to, "@g.us") ||
+		strings.Contains(to, "@newsletter") ||
+		strings.Contains(to, "@broadcaster") ||
+		strings.Contains(to, "@lid") {
 		// For special types, just validate the format
 		_, err := types.ParseJID(to)
 		if err != nil {
@@ -931,9 +956,8 @@ func ValidateRecipientFormat(to string) (string, error) {
 		return to, nil
 	}
 
-	// Default: treat as phone number and add @s.whatsapp.net
-	processed := processPhoneNumberFormat(to)
-	return processed + "@s.whatsapp.net", nil
+	// If we reach here, it's not a valid phone number or JID
+	return "", fmt.Errorf("formato inválido: deve ser um número de telefone válido ou JID")
 }
 
 // isPhoneNumberFormat checks if the input looks like a phone number (standalone version)
@@ -944,14 +968,14 @@ func isPhoneNumberFormat(input string) bool {
 	cleaned = strings.ReplaceAll(cleaned, " ", "")
 	cleaned = strings.ReplaceAll(cleaned, "(", "")
 	cleaned = strings.ReplaceAll(cleaned, ")", "")
-	
+
 	// Check if all remaining characters are digits
 	for _, r := range cleaned {
 		if r < '0' || r > '9' {
 			return false
 		}
 	}
-	
+
 	// Must have at least 10 digits for a valid phone number
 	return len(cleaned) >= 10
 }
@@ -960,10 +984,10 @@ func isPhoneNumberFormat(input string) bool {
 func processPhoneNumberFormat(phoneNumber string) string {
 	// Clean the phone number
 	cleaned := cleanPhoneNumberFormat(phoneNumber)
-	
+
 	// Handle Brazilian numbers with the 9-digit rule
 	processed := processBrazilianNumberFormat(cleaned)
-	
+
 	return processed
 }
 
@@ -975,29 +999,71 @@ func cleanPhoneNumberFormat(phone string) string {
 	cleaned = strings.ReplaceAll(cleaned, "(", "")
 	cleaned = strings.ReplaceAll(cleaned, ")", "")
 	cleaned = strings.ReplaceAll(cleaned, ".", "")
-	
+
 	// Remove + if present
-	if strings.HasPrefix(cleaned, "+") {
-		cleaned = cleaned[1:]
-	}
-	
+	cleaned = strings.TrimPrefix(cleaned, "+")
+
 	return cleaned
 }
 
 // processBrazilianNumberFormat handles Brazilian number formatting (standalone version)
 func processBrazilianNumberFormat(number string) string {
-	// If it doesn't start with country code, assume it's a local Brazilian number
-	if !strings.HasPrefix(number, "55") && len(number) <= 11 {
-		// Add Brazilian country code
-		if len(number) == 11 {
-			number = "55" + number
-		} else if len(number) == 10 {
-			// Add 55 and potentially the 9
-			number = "55" + number
+	// If it doesn't start with country code, check if it's a Brazilian local number
+	if !strings.HasPrefix(number, "55") && len(number) >= 10 && len(number) <= 11 {
+		// Check if it looks like a Brazilian local number by area code
+		if isBrazilianAreaCode(number) {
+			// Add Brazilian country code
+			if len(number) == 11 || len(number) == 10 {
+				number = "55" + number
+			}
 		}
 	}
-	
+
 	return number
+}
+
+// isBrazilianAreaCode checks if a number starts with a valid Brazilian area code
+func isBrazilianAreaCode(number string) bool {
+	if len(number) < 2 {
+		return false
+	}
+
+	// Valid Brazilian area codes (11-99, but not all combinations)
+	areaCode := number[:2]
+
+	// List of valid Brazilian area codes
+	validAreaCodes := map[string]bool{
+		"11": true, "12": true, "13": true, "14": true, "15": true, "16": true, "17": true, "18": true, "19": true,
+		"21": true, "22": true, "24": true,
+		"27": true, "28": true,
+		"31": true, "32": true, "33": true, "34": true, "35": true, "37": true, "38": true,
+		"41": true, "42": true, "43": true, "44": true, "45": true, "46": true,
+		"47": true, "48": true, "49": true,
+		"51": true, "53": true, "54": true, "55": true,
+		"61": true, "62": true, "63": true, "64": true, "65": true, "66": true, "67": true, "68": true, "69": true,
+		"71": true, "73": true, "74": true, "75": true, "77": true, "79": true,
+		"81": true, "82": true, "83": true, "84": true, "85": true, "86": true, "87": true, "88": true, "89": true,
+		"91": true, "92": true, "93": true, "94": true, "95": true, "96": true, "97": true, "98": true,
+	}
+
+	// For numbers starting with valid area codes, do additional validation
+	if validAreaCodes[areaCode] {
+		// Additional check: if the number is 11 digits and starts with a typical US pattern (like 1555...),
+		// it's probably not Brazilian
+		if len(number) == 11 && strings.HasPrefix(number, "1555") {
+			return false
+		}
+
+		// Additional check: if the number is 10-11 digits starting with "15" and followed by "55",
+		// it's probably a US number (1-555-...)
+		if areaCode == "15" && len(number) >= 4 && number[2:4] == "55" {
+			return false
+		}
+
+		return true
+	}
+
+	return false
 }
 
 /*
@@ -1018,7 +1084,7 @@ Example usage of ValidateAndOrganizeRecipient:
 4. Brazilian phone numbers:
    input: "5511988376411" or "+5511988376411" or "11988376411"
    output: "5511988376411@s.whatsapp.net" or "5511883756411@s.whatsapp.net" (depending on WhatsApp validation)
-   
+
    The function will try both formats:
    - With 9: 5511988376411
    - Without 9: 5511883756411

@@ -83,24 +83,36 @@ func TestValidateRecipientFormat(t *testing.T) {
 			expected: "",
 			hasError: true,
 		},
+		{
+			name:     "Brazilian area code 35 - correct format",
+			input:    "55358837641",
+			expected: "55358837641@s.whatsapp.net",
+			hasError: false,
+		},
+		{
+			name:     "Brazilian area code 35 with extra 9",
+			input:    "5535988376411",
+			expected: "5535988376411@s.whatsapp.net",
+			hasError: false,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := ValidateRecipientFormat(tt.input)
-			
+
 			if tt.hasError {
 				if err == nil {
 					t.Errorf("Expected error for input %s, but got none", tt.input)
 				}
 				return
 			}
-			
+
 			if err != nil {
 				t.Errorf("Unexpected error for input %s: %v", tt.input, err)
 				return
 			}
-			
+
 			if result != tt.expected {
 				t.Errorf("For input %s, expected %s, but got %s", tt.input, tt.expected, result)
 			}
@@ -134,6 +146,16 @@ func TestBrazilianNumberProcessing(t *testing.T) {
 			input:    "15551234567",
 			expected: "15551234567",
 		},
+		{
+			name:     "Brazilian number area code 35 (correct format)",
+			input:    "55358837641",
+			expected: "55358837641",
+		},
+		{
+			name:     "Brazilian number area code 35 with incorrect 9",
+			input:    "5535988376411",
+			expected: "5535988376411", // Should remain as-is for validation test
+		},
 	}
 
 	for _, tt := range tests {
@@ -148,7 +170,7 @@ func TestBrazilianNumberProcessing(t *testing.T) {
 
 func TestRemoveNinthDigitFromBrazilian(t *testing.T) {
 	ms := &MessageService{}
-	
+
 	tests := []struct {
 		name     string
 		input    string
@@ -188,7 +210,7 @@ func TestRemoveNinthDigitFromBrazilian(t *testing.T) {
 
 func TestAddNinthDigitToBrazilian(t *testing.T) {
 	ms := &MessageService{}
-	
+
 	tests := []struct {
 		name     string
 		input    string
