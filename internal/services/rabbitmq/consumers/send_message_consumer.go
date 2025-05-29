@@ -158,7 +158,24 @@ func (smc *SendMessageConsumer) handleMessage(deliveryTag uint64, routingKey str
 			"delivery_tag", deliveryTag,
 			"routing_key", routingKey,
 			"body", string(body))
-		return fmt.Errorf("invalid message payload: %w", err)
+
+		// Try to extract sessionID from raw body for error event publishing
+		sessionID := "unknown-session"
+		var rawData map[string]interface{}
+		if rawErr := json.Unmarshal(body, &rawData); rawErr == nil {
+			if rawSessionID, ok := rawData["sessionId"].(string); ok && rawSessionID != "" {
+				sessionID = rawSessionID
+			}
+		}
+
+		// Publish error event for JSON parsing failure
+		smc.publishErrorEvent(sessionID, "send-message-error", string(body), err)
+
+		// For JSON parsing errors, we should acknowledge the message to prevent requeuing
+		// as the message will never be parseable
+		logger.Info("🚮 CONSUMER: Message acknowledged despite JSON parsing error to prevent queue blocking",
+			"error", err.Error())
+		return nil
 	}
 
 	logger.Info("✅ CONSUMER: Successfully parsed JSON payload",
@@ -171,7 +188,11 @@ func (smc *SendMessageConsumer) handleMessage(deliveryTag uint64, routingKey str
 		err := fmt.Errorf("sessionId and jid are required")
 		logger.Error("❌ CONSUMER: Invalid message payload", "error", err, "payload", payload)
 		smc.publishErrorEvent(payload.SessionID, "send-message-error", payload, err)
-		return err
+
+		// Don't return error to prevent message requeuing for validation errors
+		logger.Info("🚮 CONSUMER: Message acknowledged despite validation error to prevent queue blocking",
+			"error", err.Error())
+		return nil
 	}
 
 	logger.Info("🚀 CONSUMER: Starting to process send message request",
@@ -191,7 +212,14 @@ func (smc *SendMessageConsumer) handleMessage(deliveryTag uint64, routingKey str
 			"jid", payload.JID)
 
 		smc.publishErrorEvent(payload.SessionID, "send-message-error", payload, err)
-		return err
+
+		// Don't return error to prevent message requeuing and queue blocking
+		// The error event has been published, so the error is properly handled
+		logger.Info("🚮 CONSUMER: Message acknowledged despite error to prevent queue blocking",
+			"session_id", payload.SessionID,
+			"jid", payload.JID,
+			"error", err.Error())
+		return nil
 	}
 
 	logger.Info("✅ CONSUMER: Message processed successfully via session manager",
@@ -327,6 +355,11 @@ func (smc *SendMessageConsumer) publishErrorEvent(sessionID, eventType string, p
 		return
 	}
 
+	// Use a default sessionID if empty to ensure error event is still published
+	if sessionID == "" {
+		sessionID = "unknown-session"
+	}
+
 	errorEvent := map[string]interface{}{
 		"sessionId": sessionID,
 		"eventType": eventType,
@@ -340,6 +373,11 @@ func (smc *SendMessageConsumer) publishErrorEvent(sessionID, eventType string, p
 
 	if publishErr := smc.publisher.PublishEvent(ctx, sessionID, eventType, errorEvent); publishErr != nil {
 		logger.Error("Failed to publish error event", "error", publishErr, "session_id", sessionID)
+	} else {
+		logger.Info("📤 CONSUMER: Error event published successfully",
+			"session_id", sessionID,
+			"event_type", eventType,
+			"error", err.Error())
 	}
 }
 

@@ -210,6 +210,11 @@ func (qs *QueueSetup) SetupWhatsAppQueues() error {
 			name:       "whatsapp.events.group.members.updated",
 			routingKey: "whatsapp.events.group.members.demoted",
 		},
+		// Error events
+		{
+			name:       "whatsapp.events.send-message-error",
+			routingKey: "whatsapp.events.send-message-error",
+		},
 		// Group settings events
 		{
 			name:       "whatsapp.events.group.updated",
