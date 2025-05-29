@@ -112,11 +112,6 @@ func (cs *CommunityService) GetCommunityInfo(userID, communityJID string) (inter
 		return nil, fmt.Errorf("falha ao obter informações da comunidade: %w", err)
 	}
 
-	// Verificar se é uma comunidade (IsParent deve ser true)
-	if !info.IsParent {
-		return nil, fmt.Errorf("o JID não é uma comunidade, é um grupo normal: %s", communityJID)
-	}
-
 	// Obter subgrupos da comunidade
 	subGroups, err := client.GetSubGroups(jid)
 	if err != nil {

@@ -64,7 +64,6 @@ type UpdateGroupNameRequest struct {
 
 // UpdateGroupTopicRequest representa a requisição para atualizar tópico do grupo
 type UpdateGroupTopicRequest struct {
-	UserID   string `json:"user_id" binding:"required"`
 	GroupJID string `json:"group_jid" binding:"required"`
 	NewTopic string `json:"new_topic" binding:"required"`
 }
