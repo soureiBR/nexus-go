@@ -1,0 +1,59 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Launch API Server",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/cmd/api",
+            "env": {
+                "PORT": "8080",
+                "HOST": "0.0.0.0",
+                "API_KEY": "your-dev-api-key",
+                "LOG_LEVEL": "debug",
+                "SESSION_DIR": "${workspaceFolder}/sessions",
+                "ENVIRONMENT": "development",
+                "GIN_MODE": "debug"
+            },
+            "args": [],
+            "showLog": true,
+            "preLaunchTask": "Build"
+        },
+        {
+            "name": "Debug Current Test",
+            "type": "go",
+            "request": "launch",
+            "mode": "test",
+            "program": "${fileDirname}",
+            "args": [
+                "-test.run",
+                "${input:testName}"
+            ],
+            "showLog": true
+        },
+        {
+            "name": "Debug Current File",
+            "type": "go",
+            "request": "launch",
+            "mode": "debug",
+            "program": "${file}",
+            "showLog": true
+        },
+        {
+            "name": "Attach to Process",
+            "type": "go",
+            "request": "attach",
+            "mode": "local",
+            "processId": "${command:pickProcess}"
+        }
+    ],
+    "inputs": [
+        {
+            "id": "testName",
+            "description": "Enter test function name",
+            "default": "",
+            "type": "promptString"
+        }
+    ]
+}

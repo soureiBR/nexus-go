@@ -1,0 +1,63 @@
+{
+    "go.testFlags": [
+        "-v"
+    ],
+    "go.buildFlags": [],
+    "go.lintFlags": [],
+    "go.vetFlags": [],
+    "go.coverOnSave": false,
+    "go.coverOnSingleTest": false,
+    "go.useLanguageServer": true,
+    "go.gopath": "/go",
+    "go.goroot": "/usr/local/go",
+    "go.toolsManagement.checkForUpdates": "local",
+    "go.testTimeout": "30s",
+    "go.coverageDecorator": {
+        "type": "gutter",
+        "coveredHighlightColor": "rgba(64,128,128,0.5)",
+        "uncoveredHighlightColor": "rgba(128,64,64,0.25)"
+    },
+    "files.exclude": {
+        "**/tmp": true,
+        "**/sessions": true,
+        "**/*.log": true
+    },
+    "files.watcherExclude": {
+        "**/tmp/**": true,
+        "**/sessions/**": true,
+        "**/data/**": true,
+        "**/.git/objects/**": true,
+        "**/.git/subtree-cache/**": true,
+        "**/node_modules/**": true
+    },
+    "search.exclude": {
+        "**/tmp": true,
+        "**/sessions": true,
+        "**/data": true
+    },
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+        "source.organizeImports": "explicit"
+    },
+    "[go]": {
+        "editor.tabSize": 4,
+        "editor.insertSpaces": false,
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "golang.go"
+    },
+    "[json]": {
+        "editor.tabSize": 2,
+        "editor.insertSpaces": true
+    },
+    "[yaml]": {
+        "editor.tabSize": 2,
+        "editor.insertSpaces": true
+    },
+    "[dockerfile]": {
+        "editor.tabSize": 2,
+        "editor.insertSpaces": true
+    },
+    "terminal.integrated.defaultProfile.linux": "bash",
+    "terminal.integrated.cwd": "${workspaceFolder}",
+    "git.ignoreLimitWarning": true
+}

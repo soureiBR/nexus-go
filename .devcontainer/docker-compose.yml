@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: .devcontainer/Dockerfile
+    volumes:
+      - ../..:/workspaces:cached
+      - vscode-extensions:/home/vscode/.vscode-server/extensions
+      - go-modules:/go/pkg/mod
+    command: sleep infinity
+    environment:
+      - GO111MODULE=on
+      - GOPROXY=https://proxy.golang.org,direct
+      - GOSUMDB=sum.golang.org
+      - CGO_ENABLED=1
+    networks:
+      - dev-network
+    depends_on:
+      - rabbitmq
+
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: rabbitmq-dev
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin123
+      RABBITMQ_DEFAULT_VHOST: /
+    ports:
+      - "5672:5672" # AMQP port
+      - "15672:15672" # Management UI
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - dev-network
+    healthcheck:
+      test: [ "CMD", "rabbitmq-diagnostics", "ping" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+volumes:
+  vscode-extensions:
+  go-modules:
+  rabbitmq-data:
+
+
+networks:
+  dev-network:
+    driver: bridge
