@@ -13,12 +13,14 @@ services:
       - "8080:8080"
     volumes:
       - whatsapp-sessions:/app/sessions
+      - whatsapp-data:/app/data
     environment:
       - PORT=8080
       - API_KEY=${API_KEY:-your-secure-api-key}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - WEBHOOK_URL=${WEBHOOK_URL:-}
-      - RABBITMQ_URL=
+      - DB_PATH=/app/data/whatsapp.db
+      - RABBITMQ_URL=${RABBITMQ_URL:-amqp://guest:guest@localhost:5672/}
     healthcheck:
       test: [ "CMD", "wget", "-qO-", "http://localhost:8080/health" ]
       interval: 30s
@@ -34,4 +36,6 @@ networks:
 
 volumes:
   whatsapp-sessions:
+    driver: local
+  whatsapp-data:
     driver: local

@@ -9,14 +9,17 @@ services:
       - .:/app
       - go-modules:/go/pkg/mod
       - whatsapp-sessions-dev:/app/sessions
+      - whatsapp-data-dev:/app/data
     ports:
       - "8080:8080"
     environment:
       - PORT=8080
-      - API_KEY=${API_KEY:-your-secure-api-key}
-      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - API_KEY=${API_KEY:-your-dev-api-key}
+      - LOG_LEVEL=${LOG_LEVEL:-debug}
       - WEBHOOK_URL=${WEBHOOK_URL:-}
-      - RABBITMQ_URL=
+      - DB_PATH=/app/data/whatsapp.db
+      - RABBITMQ_URL=${RABBITMQ_URL:-amqp://guest:guest@localhost:5672/}
+      - GIN_MODE=debug
     command: >
       sh -c "apk add --no-cache gcc musl-dev && 
              go install github.com/cosmtrek/air@latest && 
@@ -32,4 +35,6 @@ volumes:
   go-modules:
     driver: local
   whatsapp-sessions-dev:
+    driver: local
+  whatsapp-data-dev:
     driver: local
