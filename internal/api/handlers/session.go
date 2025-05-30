@@ -34,6 +34,7 @@ type SessionResponse struct {
 	Connected  bool   `json:"connected"`
 	CreatedAt  string `json:"created_at"`
 	LastActive string `json:"last_active,omitempty"`
+	Picture    string `json:"picture,omitempty"`
 }
 
 // NewSessionHandler cria um novo handler para sessões
@@ -84,6 +85,15 @@ func (h *SessionHandler) CreateSession(c *gin.Context) {
 		resp.LastActive = client.LastActive.Format(time.RFC3339)
 	}
 
+	// Obter foto de perfil se o cliente estiver conectado
+	if client.Connected && client.WAClient != nil && client.WAClient.Store.ID != nil {
+		myJID := client.WAClient.Store.ID.ToNonAD()
+		pictureInfo, err := client.WAClient.GetProfilePictureInfo(myJID, nil)
+		if err == nil && pictureInfo != nil && pictureInfo.URL != "" {
+			resp.Picture = pictureInfo.URL
+		}
+	}
+
 	c.JSON(http.StatusCreated, resp)
 }
 
@@ -118,6 +128,15 @@ func (h *SessionHandler) GetSession(c *gin.Context) {
 
 	if !client.LastActive.IsZero() {
 		resp.LastActive = client.LastActive.Format(time.RFC3339)
+	}
+
+	// Obter foto de perfil se o cliente estiver conectado
+	if client.Connected && client.WAClient != nil && client.WAClient.Store.ID != nil {
+		myJID := client.WAClient.Store.ID.ToNonAD()
+		pictureInfo, err := client.WAClient.GetProfilePictureInfo(myJID, nil)
+		if err == nil && pictureInfo != nil && pictureInfo.URL != "" {
+			resp.Picture = pictureInfo.URL
+		}
 	}
 
 	c.JSON(http.StatusOK, resp)
