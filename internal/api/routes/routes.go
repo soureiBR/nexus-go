@@ -23,6 +23,15 @@ func SetupRoutes(
 	// Middleware global
 	r.Use(middlewares.Logger())
 
+	// Rota de health check (sem autenticação)
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"status":    "ok",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+			"service":   "WhatsApp API",
+		})
+	})
+
 	// Grupo de rotas para API v1
 	v1 := r.Group("/api/v1")
 	v1.Use(authMiddleware.AuthenticateAndExtractUserID())

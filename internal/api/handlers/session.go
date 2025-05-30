@@ -35,6 +35,7 @@ type SessionResponse struct {
 	CreatedAt  string `json:"created_at"`
 	LastActive string `json:"last_active,omitempty"`
 	Picture    string `json:"picture,omitempty"`
+	PhoneNumber string `json:"phone_number,omitempty"`
 }
 
 // NewSessionHandler cria um novo handler para sessões
@@ -132,6 +133,11 @@ func (h *SessionHandler) GetSession(c *gin.Context) {
 
 	// Obter foto de perfil se o cliente estiver conectado
 	if client.Connected && client.WAClient != nil && client.WAClient.Store.ID != nil {
+		ownJID := client.WAClient.Store.ID
+        if !ownJID.IsEmpty() {
+            phoneNumber := ownJID.User // This contains your phone number
+            resp.PhoneNumber = phoneNumber
+        }
 		myJID := client.WAClient.Store.ID.ToNonAD()
 		pictureInfo, err := client.WAClient.GetProfilePictureInfo(myJID, nil)
 		if err == nil && pictureInfo != nil && pictureInfo.URL != "" {
