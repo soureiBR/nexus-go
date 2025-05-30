@@ -2,8 +2,13 @@
 package session
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"image"
+	"image/jpeg"
+	_ "image/gif"
+	_ "image/png"
 	"time"
 
 	"go.mau.fi/whatsmeow"
@@ -152,6 +157,29 @@ func (sm *SessionManager) UpdatePresence(userID string, presence types.Presence)
 	return nil
 }
 
+// convertToJPEG converts image data to JPEG format
+func convertToJPEG(imageData []byte, quality int) ([]byte, error) {
+	// Decodifica a imagem (detecta automaticamente o formato)
+	img, format, err := image.Decode(bytes.NewReader(imageData))
+	if err != nil {
+		return nil, fmt.Errorf("falha ao decodificar imagem (formato: %s): %w", format, err)
+	}
+
+	// Se já é JPEG, retorna os dados originais (otimização)
+	if format == "jpeg" {
+		return imageData, nil
+	}
+
+	// Converte para JPEG
+	var buf bytes.Buffer
+	err = jpeg.Encode(&buf, img, &jpeg.Options{Quality: quality})
+	if err != nil {
+		return nil, fmt.Errorf("falha ao codificar imagem como JPEG: %w", err)
+	}
+
+	return buf.Bytes(), nil
+}
+
 // UpdateProfilePicture atualiza a foto de perfil
 func (sm *SessionManager) UpdateProfilePicture(userID string, imageData []byte) error {
 	client, exists := sm.GetSession(userID)
@@ -168,8 +196,14 @@ func (sm *SessionManager) UpdateProfilePicture(userID string, imageData []byte) 
 	// mas com o JID do usuário em vez de um grupo
 	selfJID := client.WAClient.Store.ID.ToNonAD()
 
+	// Converter imagem para JPEG antes de enviar
+	jpegData, err := convertToJPEG(imageData, 85) // 85 é a qualidade do JPEG
+	if err != nil {
+		return fmt.Errorf("falha ao converter imagem para JPEG: %w", err)
+	}
+
 	// Como SetGroupPhoto usa o mesmo namespace, deveria funcionar de forma semelhante
-	_, err := client.WAClient.SetGroupPhoto(selfJID, imageData)
+	_, err = client.WAClient.SetGroupPhoto(selfJID, jpegData)
 	if err != nil {
 		return fmt.Errorf("falha ao atualizar foto de perfil: %w", err)
 	}

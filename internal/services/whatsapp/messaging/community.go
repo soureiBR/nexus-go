@@ -282,19 +282,71 @@ func (cs *CommunityService) UpdateCommunityPictureFromURL(userID, communityJID, 
 	}
 	defer resp.Body.Close()
 
+	// Check HTTP status
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("falha ao baixar imagem: HTTP %d - %s", resp.StatusCode, resp.Status)
+	}
+
+	// Validate content type
+	contentType := resp.Header.Get("Content-Type")
+	if contentType != "" && !strings.HasPrefix(contentType, "image/") {
+		logger.Warn("Tipo de conteúdo suspeito para imagem",
+			"content_type", contentType,
+			"image_url", imageURL)
+	}
+
 	// Read the image data
 	imageData, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("falha ao ler dados da imagem: %w", err)
 	}
 
-	// Set the community photo
-	pictureID, err := client.SetGroupPhoto(jid, imageData)
+	// Validate image data
+	if len(imageData) == 0 {
+		return "", fmt.Errorf("dados da imagem estão vazios")
+	}
+
+	logger.Debug("Baixando imagem para atualizar foto da comunidade",
+		"user_id", userID,
+		"community_jid", communityJID,
+		"image_url", imageURL,
+		"size_bytes", len(imageData),
+		"content_type", contentType)
+
+	// Convert image to JPEG format (WhatsApp only supports JPEG for community pictures)
+	jpegData, err := convertToJPEG(imageData, 85) // Quality 85 provides good balance between quality and file size
 	if err != nil {
+		return "", fmt.Errorf("falha ao converter imagem para JPEG: %w", err)
+	}
+
+	// Validate JPEG magic bytes (WhatsApp requires strict JPEG validation)
+	if len(jpegData) < 2 || jpegData[0] != 0xFF || jpegData[1] != 0xD8 {
+		logger.Error("Dados JPEG inválidos - magic bytes incorretos",
+			"user_id", userID,
+			"community_jid", communityJID,
+			"data_length", len(jpegData),
+			"first_bytes", fmt.Sprintf("%X", jpegData[:min(10, len(jpegData))]))
+		return "", fmt.Errorf("dados JPEG inválidos: magic bytes incorretos")
+	}
+
+	logger.Debug("Imagem convertida para JPEG",
+		"user_id", userID,
+		"community_jid", communityJID,
+		"original_size", len(imageData),
+		"jpeg_size", len(jpegData),
+		"jpeg_magic_bytes", fmt.Sprintf("%X %X", jpegData[0], jpegData[1]))
+
+	// Set the community photo
+	pictureID, err := client.SetGroupPhoto(jid, jpegData)
+	if err != nil {
+		logger.Error("Falha ao definir foto da comunidade no WhatsApp",
+			"error", err,
+			"user_id", userID,
+			"community_jid", communityJID)
 		return "", fmt.Errorf("falha ao atualizar foto da comunidade: %w", err)
 	}
 
-	logger.Debug("Foto da comunidade atualizada",
+	logger.Debug("Foto da comunidade atualizada com sucesso",
 		"user_id", userID,
 		"community_jid", communityJID,
 		"picture_id", pictureID)

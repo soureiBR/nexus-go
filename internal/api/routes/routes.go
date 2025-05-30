@@ -72,9 +72,9 @@ func SetupRoutes(
 	newsletter := v1.Group("/newsletter")
 	{
 		newsletter.POST("/create", newsletterHandler.CreateChannel)
-		newsletter.POST("/info", newsletterHandler.GetChannelInfo)
+		newsletter.GET("/info", newsletterHandler.GetChannelInfo)
 		newsletter.POST("/info-invite", newsletterHandler.GetChannelWithInvite)
-		newsletter.POST("/list", newsletterHandler.ListMyChannels)
+		newsletter.GET("/list", newsletterHandler.ListMyChannels)
 		newsletter.POST("/follow", newsletterHandler.FollowChannel)
 		newsletter.POST("/unfollow", newsletterHandler.UnfollowChannel)
 		newsletter.POST("/mute", newsletterHandler.MuteChannel)
