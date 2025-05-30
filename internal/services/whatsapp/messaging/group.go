@@ -1172,3 +1172,181 @@ func (gs *GroupService) isBrazilianAreaCode(number string) bool {
 
 	return false
 }
+
+// Group permission methods
+
+// SetGroupLocked altera o status de bloqueio do grupo (somente admins podem modificar informações do grupo)
+func (gs *GroupService) SetGroupLocked(userID, groupJID string, locked bool) error {
+	client, exists := gs.groupManager.GetSession(userID)
+	if !exists {
+		return fmt.Errorf("sessão não encontrada: %s", userID)
+	}
+
+	if !client.IsConnected() {
+		return fmt.Errorf("sessão não conectada: %s", userID)
+	}
+
+	// Atualizar atividade
+	client.UpdateActivity()
+
+	// Converter para JID do grupo
+	groupID, err := types.ParseJID(groupJID)
+	if err != nil {
+		return fmt.Errorf("JID de grupo inválido: %w", err)
+	}
+
+	// Verificar se é realmente um grupo
+	if groupID.Server != types.GroupServer {
+		return fmt.Errorf("JID não é um grupo: %s", groupJID)
+	}
+
+	// Alterar status de bloqueio
+	err = client.GetWAClient().SetGroupLocked(groupID, locked)
+	if err != nil {
+		return fmt.Errorf("falha ao alterar status de bloqueio do grupo: %w", err)
+	}
+
+	// Log
+	logger.Debug("Status de bloqueio do grupo alterado",
+		"user_id", userID,
+		"group_jid", groupJID,
+		"locked", locked)
+
+	return nil
+}
+
+// SetGroupAnnounce altera o modo de anúncio do grupo (somente admins podem enviar mensagens)
+func (gs *GroupService) SetGroupAnnounce(userID, groupJID string, announce bool) error {
+	client, exists := gs.groupManager.GetSession(userID)
+	if !exists {
+		return fmt.Errorf("sessão não encontrada: %s", userID)
+	}
+
+	if !client.IsConnected() {
+		return fmt.Errorf("sessão não conectada: %s", userID)
+	}
+
+	// Atualizar atividade
+	client.UpdateActivity()
+
+	// Converter para JID do grupo
+	groupID, err := types.ParseJID(groupJID)
+	if err != nil {
+		return fmt.Errorf("JID de grupo inválido: %w", err)
+	}
+
+	// Verificar se é realmente um grupo
+	if groupID.Server != types.GroupServer {
+		return fmt.Errorf("JID não é um grupo: %s", groupJID)
+	}
+
+	// Alterar modo de anúncio
+	err = client.GetWAClient().SetGroupAnnounce(groupID, announce)
+	if err != nil {
+		return fmt.Errorf("falha ao alterar modo de anúncio do grupo: %w", err)
+	}
+
+	// Log
+	logger.Debug("Modo de anúncio do grupo alterado",
+		"user_id", userID,
+		"group_jid", groupJID,
+		"announce", announce)
+
+	return nil
+}
+
+// SetGroupJoinApprovalMode altera o modo de aprovação de entrada do grupo
+func (gs *GroupService) SetGroupJoinApprovalMode(userID, groupJID, mode string) error {
+	client, exists := gs.groupManager.GetSession(userID)
+	if !exists {
+		return fmt.Errorf("sessão não encontrada: %s", userID)
+	}
+
+	if !client.IsConnected() {
+		return fmt.Errorf("sessão não conectada: %s", userID)
+	}
+
+	// Atualizar atividade
+	client.UpdateActivity()
+
+	// Converter para JID do grupo
+	groupID, err := types.ParseJID(groupJID)
+	if err != nil {
+		return fmt.Errorf("JID de grupo inválido: %w", err)
+	}
+
+	// Verificar se é realmente um grupo
+	if groupID.Server != types.GroupServer {
+		return fmt.Errorf("JID não é um grupo: %s", groupJID)
+	}
+
+	// Converter modo para booleano
+	requireApproval := mode == "on"
+
+	// Alterar modo de aprovação de entrada
+	err = client.GetWAClient().SetGroupJoinApprovalMode(groupID, requireApproval)
+	if err != nil {
+		return fmt.Errorf("falha ao alterar modo de aprovação de entrada do grupo: %w", err)
+	}
+
+	// Log
+	logger.Debug("Modo de aprovação de entrada do grupo alterado",
+		"user_id", userID,
+		"group_jid", groupJID,
+		"mode", mode,
+		"require_approval", requireApproval)
+
+	return nil
+}
+
+// SetGroupMemberAddMode altera o modo de adição de membros do grupo
+func (gs *GroupService) SetGroupMemberAddMode(userID, groupJID, mode string) error {
+	client, exists := gs.groupManager.GetSession(userID)
+	if !exists {
+		return fmt.Errorf("sessão não encontrada: %s", userID)
+	}
+
+	if !client.IsConnected() {
+		return fmt.Errorf("sessão não conectada: %s", userID)
+	}
+
+	// Atualizar atividade
+	client.UpdateActivity()
+
+	// Converter para JID do grupo
+	groupID, err := types.ParseJID(groupJID)
+	if err != nil {
+		return fmt.Errorf("JID de grupo inválido: %w", err)
+	}
+
+	// Verificar se é realmente um grupo
+	if groupID.Server != types.GroupServer {
+		return fmt.Errorf("JID não é um grupo: %s", groupJID)
+	}
+
+	// Converter modo para o tipo adequado
+	var memberAddMode types.GroupMemberAddMode
+	switch mode {
+	case "admin_add":
+		memberAddMode = types.GroupMemberAddModeAdmin
+	case "all_member_add":
+		memberAddMode = types.GroupMemberAddModeAllMember
+	default:
+		return fmt.Errorf("modo de adição de membros inválido: %s (deve ser 'admin_add' ou 'all_member_add')", mode)
+	}
+
+	// Alterar modo de adição de membros
+	err = client.GetWAClient().SetGroupMemberAddMode(groupID, memberAddMode)
+	if err != nil {
+		return fmt.Errorf("falha ao alterar modo de adição de membros do grupo: %w", err)
+	}
+
+	// Log
+	logger.Debug("Modo de adição de membros do grupo alterado",
+		"user_id", userID,
+		"group_jid", groupJID,
+		"mode", mode,
+		"member_add_mode", memberAddMode)
+
+	return nil
+}

@@ -135,6 +135,10 @@ const (
 	CmdJoinGroupWithLink        CommandType = "join_group_with_link"
 	CmdGetGroupInviteLink       CommandType = "get_group_invite_link"
 	CmdRevokeGroupInviteLink    CommandType = "revoke_group_invite_link"
+	CmdSetGroupLocked           CommandType = "set_group_locked"
+	CmdSetGroupAnnounce         CommandType = "set_group_announce"
+	CmdSetGroupJoinApprovalMode CommandType = "set_group_join_approval_mode"
+	CmdSetGroupMemberAddMode    CommandType = "set_group_member_add_mode"
 
 	// Newsletter commands
 	CmdCreateChannel          CommandType = "create_channel"
@@ -310,6 +314,10 @@ type GroupServiceInterface interface {
 	JoinGroupWithLink(userID, link string) (interface{}, error)
 	GetGroupInviteLink(userID, groupJID string) (string, error)
 	RevokeGroupInviteLink(userID, groupJID string) (string, error)
+	SetGroupLocked(userID, groupJID string, locked bool) error
+	SetGroupAnnounce(userID, groupJID string, announce bool) error
+	SetGroupJoinApprovalMode(userID, groupJID string, mode string) error
+	SetGroupMemberAddMode(userID, groupJID string, mode string) error
 }
 
 // MessageServiceInterface defines messaging operations interface

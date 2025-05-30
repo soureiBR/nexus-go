@@ -275,6 +275,14 @@ func (w *Worker) processTask(task Task) {
 		response = w.handleGetGroupInviteLink(task.Payload.(GroupInviteLinkPayload))
 	case CmdRevokeGroupInviteLink:
 		response = w.handleRevokeGroupInviteLink(task.Payload.(GroupInviteLinkPayload))
+	case CmdSetGroupLocked:
+		response = w.handleSetGroupLocked(task.Payload.(SetGroupLockedPayload))
+	case CmdSetGroupAnnounce:
+		response = w.handleSetGroupAnnounce(task.Payload.(SetGroupAnnouncePayload))
+	case CmdSetGroupJoinApprovalMode:
+		response = w.handleSetGroupJoinApprovalMode(task.Payload.(SetGroupJoinApprovalModePayload))
+	case CmdSetGroupMemberAddMode:
+		response = w.handleSetGroupMemberAddMode(task.Payload.(SetGroupMemberAddModePayload))
 
 		// Newsletter commands
 	case CmdCreateChannel:
@@ -654,6 +662,39 @@ func (w *Worker) handleRevokeGroupInviteLink(payload GroupInviteLinkPayload) Com
 		return CommandResponse{Error: fmt.Errorf("falha ao revogar link de convite do grupo: %w", err)}
 	}
 	return CommandResponse{Data: link}
+}
+
+// Group permission handlers
+func (w *Worker) handleSetGroupLocked(payload SetGroupLockedPayload) CommandResponse {
+	err := w.groupService.SetGroupLocked(w.UserID, payload.GroupJID, payload.Locked)
+	if err != nil {
+		return CommandResponse{Error: fmt.Errorf("falha ao alterar status de bloqueio do grupo: %w", err)}
+	}
+	return CommandResponse{Data: "status de bloqueio do grupo alterado"}
+}
+
+func (w *Worker) handleSetGroupAnnounce(payload SetGroupAnnouncePayload) CommandResponse {
+	err := w.groupService.SetGroupAnnounce(w.UserID, payload.GroupJID, payload.Announce)
+	if err != nil {
+		return CommandResponse{Error: fmt.Errorf("falha ao alterar modo de anúncio do grupo: %w", err)}
+	}
+	return CommandResponse{Data: "modo de anúncio do grupo alterado"}
+}
+
+func (w *Worker) handleSetGroupJoinApprovalMode(payload SetGroupJoinApprovalModePayload) CommandResponse {
+	err := w.groupService.SetGroupJoinApprovalMode(w.UserID, payload.GroupJID, payload.Mode)
+	if err != nil {
+		return CommandResponse{Error: fmt.Errorf("falha ao alterar modo de aprovação de entrada do grupo: %w", err)}
+	}
+	return CommandResponse{Data: "modo de aprovação de entrada do grupo alterado"}
+}
+
+func (w *Worker) handleSetGroupMemberAddMode(payload SetGroupMemberAddModePayload) CommandResponse {
+	err := w.groupService.SetGroupMemberAddMode(w.UserID, payload.GroupJID, payload.Mode)
+	if err != nil {
+		return CommandResponse{Error: fmt.Errorf("falha ao alterar modo de adição de membros do grupo: %w", err)}
+	}
+	return CommandResponse{Data: "modo de adição de membros do grupo alterado"}
 }
 
 // Newsletter command handlers - now using newsletterService directly like communities and groups

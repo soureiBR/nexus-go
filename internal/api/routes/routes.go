@@ -66,6 +66,10 @@ func SetupRoutes(
 		group.POST("/join", groupHandler.JoinGroupWithLink)
 		group.GET("/invite-link", groupHandler.GetGroupInviteLink)
 		group.POST("/invite-link/revoke", groupHandler.RevokeGroupInviteLink)
+		group.POST("/set-locked", groupHandler.SetGroupLocked)
+		group.POST("/set-announce", groupHandler.SetGroupAnnounce)
+		group.POST("/set-join-approval", groupHandler.SetGroupJoinApprovalMode)
+		group.POST("/set-member-add-mode", groupHandler.SetGroupMemberAddMode)
 	}
 
 	// Rotas de newsletter

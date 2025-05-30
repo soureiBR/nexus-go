@@ -147,6 +147,27 @@ type GroupInviteLinkPayload struct {
 	GroupJID string `json:"group_jid"`
 }
 
+// Group permission payload structures
+type SetGroupLockedPayload struct {
+	GroupJID string `json:"group_jid"`
+	Locked   bool   `json:"locked"`
+}
+
+type SetGroupAnnouncePayload struct {
+	GroupJID string `json:"group_jid"`
+	Announce bool   `json:"announce"`
+}
+
+type SetGroupJoinApprovalModePayload struct {
+	GroupJID string `json:"group_jid"`
+	Mode     string `json:"mode"`
+}
+
+type SetGroupMemberAddModePayload struct {
+	GroupJID string `json:"group_jid"`
+	Mode     string `json:"mode"`
+}
+
 // Newsletter payload structures
 type CreateChannelPayload struct {
 	Name        string `json:"name"`

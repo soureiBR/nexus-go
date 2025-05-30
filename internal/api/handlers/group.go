@@ -100,6 +100,30 @@ type RevokeInviteLinkRequest struct {
 	GroupJID string `json:"group_jid" binding:"required"`
 }
 
+// SetGroupLockedRequest representa a requisição para alterar o status de bloqueio do grupo
+type SetGroupLockedRequest struct {
+	GroupJID string `json:"group_jid" binding:"required"`
+	Locked   bool   `json:"locked" binding:"required"`
+}
+
+// SetGroupAnnounceRequest representa a requisição para alterar o modo de anúncio do grupo
+type SetGroupAnnounceRequest struct {
+	GroupJID string `json:"group_jid" binding:"required"`
+	Announce bool   `json:"announce" binding:"required"`
+}
+
+// SetGroupJoinApprovalModeRequest representa a requisição para alterar o modo de aprovação de entrada
+type SetGroupJoinApprovalModeRequest struct {
+	GroupJID string `json:"group_jid" binding:"required"`
+	Mode     string `json:"mode" binding:"required,oneof=on off"`
+}
+
+// SetGroupMemberAddModeRequest representa a requisição para alterar o modo de adição de membros
+type SetGroupMemberAddModeRequest struct {
+	GroupJID string `json:"group_jid" binding:"required"`
+	Mode     string `json:"mode" binding:"required,oneof=admin_add all_member_add"`
+}
+
 // submitWorkerTask submits a task to the worker system and waits for response with proper error handling
 func (h *GroupHandler) submitWorkerTask(userID string, taskType worker.CommandType, payload interface{}) (interface{}, error) {
 	// Get coordinator and worker pool
@@ -693,5 +717,161 @@ func (h *GroupHandler) RevokeGroupInviteLink(c *gin.Context) {
 		"success":     true,
 		"invite_link": result,
 		"message":     "Link de convite revogado e novo gerado com sucesso",
+	})
+}
+
+// SetGroupLocked altera o status de bloqueio do grupo
+func (h *GroupHandler) SetGroupLocked(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
+		return
+	}
+
+	userIDStr := userID.(string)
+
+	var req SetGroupLockedRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
+		return
+	}
+
+	// Create payload
+	payload := worker.SetGroupLockedPayload{
+		GroupJID: req.GroupJID,
+		Locked:   req.Locked,
+	}
+
+	// Submit task to worker
+	_, err := h.submitWorkerTask(userIDStr, worker.CmdSetGroupLocked, payload)
+	if err != nil {
+		logger.Error("Falha ao alterar status de bloqueio do grupo",
+			"error", err,
+			"user_id", userIDStr,
+			"group_jid", req.GroupJID)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao alterar status de bloqueio do grupo", "details": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Status de bloqueio do grupo alterado com sucesso",
+	})
+}
+
+// SetGroupAnnounce altera o modo de anúncio do grupo
+func (h *GroupHandler) SetGroupAnnounce(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
+		return
+	}
+
+	userIDStr := userID.(string)
+
+	var req SetGroupAnnounceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
+		return
+	}
+
+	// Create payload
+	payload := worker.SetGroupAnnouncePayload{
+		GroupJID: req.GroupJID,
+		Announce: req.Announce,
+	}
+
+	// Submit task to worker
+	_, err := h.submitWorkerTask(userIDStr, worker.CmdSetGroupAnnounce, payload)
+	if err != nil {
+		logger.Error("Falha ao alterar modo de anúncio do grupo",
+			"error", err,
+			"user_id", userIDStr,
+			"group_jid", req.GroupJID)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao alterar modo de anúncio do grupo", "details": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Modo de anúncio do grupo alterado com sucesso",
+	})
+}
+
+// SetGroupJoinApprovalMode altera o modo de aprovação de entrada do grupo
+func (h *GroupHandler) SetGroupJoinApprovalMode(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
+		return
+	}
+
+	userIDStr := userID.(string)
+
+	var req SetGroupJoinApprovalModeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
+		return
+	}
+
+	// Create payload
+	payload := worker.SetGroupJoinApprovalModePayload{
+		GroupJID: req.GroupJID,
+		Mode:     req.Mode,
+	}
+
+	// Submit task to worker
+	_, err := h.submitWorkerTask(userIDStr, worker.CmdSetGroupJoinApprovalMode, payload)
+	if err != nil {
+		logger.Error("Falha ao alterar modo de aprovação de entrada do grupo",
+			"error", err,
+			"user_id", userIDStr,
+			"group_jid", req.GroupJID)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao alterar modo de aprovação de entrada do grupo", "details": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Modo de aprovação de entrada do grupo alterado com sucesso",
+	})
+}
+
+// SetGroupMemberAddMode altera o modo de adição de membros do grupo
+func (h *GroupHandler) SetGroupMemberAddMode(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
+		return
+	}
+
+	userIDStr := userID.(string)
+
+	var req SetGroupMemberAddModeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
+		return
+	}
+
+	// Create payload
+	payload := worker.SetGroupMemberAddModePayload{
+		GroupJID: req.GroupJID,
+		Mode:     req.Mode,
+	}
+
+	// Submit task to worker
+	_, err := h.submitWorkerTask(userIDStr, worker.CmdSetGroupMemberAddMode, payload)
+	if err != nil {
+		logger.Error("Falha ao alterar modo de adição de membros do grupo",
+			"error", err,
+			"user_id", userIDStr,
+			"group_jid", req.GroupJID)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao alterar modo de adição de membros do grupo", "details": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Modo de adição de membros do grupo alterado com sucesso",
 	})
 }
