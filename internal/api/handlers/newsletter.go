@@ -97,6 +97,12 @@ type ChannelInviteRequest struct {
 	InviteLink string `json:"invite_link" binding:"required"`
 }
 
+// UpdateNewsletterPictureRequest representa uma requisição para atualizar foto de newsletter
+type UpdateNewsletterPictureRequest struct {
+	JID      string `json:"jid" binding:"required"`
+	ImageURL string `json:"image_url" binding:"required"`
+}
+
 // ListChannelsRequest representa uma requisição para listar canais
 type ListChannelsRequest struct{}
 
@@ -452,4 +458,58 @@ func (h *NewsletterHandler) UnmuteChannel(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Notificações do canal reativadas com sucesso"})
+}
+
+// UpdateNewsletterPicture atualiza a foto da newsletter a partir de uma URL
+func (h *NewsletterHandler) UpdateNewsletterPicture(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
+		return
+	}
+
+	userIDStr := userID.(string)
+
+	var req UpdateNewsletterPictureRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
+		return
+	}
+
+	// Verificar se a sessão existe
+	client, exists := h.sessionManager.GetSession(userIDStr)
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Sessão não encontrada"})
+		return
+	}
+
+	// Verificar se o cliente está conectado
+	if !client.Connected {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Cliente não está conectado"})
+		return
+	}
+
+	// Create payload
+	payload := worker.UpdateNewsletterPicturePayload{
+		JID:      req.JID,
+		ImageURL: req.ImageURL,
+	}
+
+	// Submit task to worker
+	result, err := h.submitWorkerTask(userIDStr, worker.CmdUpdateNewsletterPicture, payload)
+	if err != nil {
+		logger.Error("Falha ao atualizar foto da newsletter",
+			"error", err,
+			"user_id", userIDStr,
+			"newsletter_jid", req.JID,
+			"image_url", req.ImageURL)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao atualizar foto da newsletter", "details": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Foto da newsletter atualizada com sucesso",
+		"data":    result,
+	})
 }

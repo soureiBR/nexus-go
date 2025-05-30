@@ -165,3 +165,8 @@ type ChannelInvitePayload struct {
 type ListChannelsPayload struct {
 	// Empty payload for listing channels
 }
+
+type UpdateNewsletterPicturePayload struct {
+	JID      string `json:"jid"`
+	ImageURL string `json:"image_url"`
+}

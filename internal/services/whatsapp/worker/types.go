@@ -137,14 +137,15 @@ const (
 	CmdRevokeGroupInviteLink    CommandType = "revoke_group_invite_link"
 
 	// Newsletter commands
-	CmdCreateChannel        CommandType = "create_channel"
-	CmdGetChannelInfo       CommandType = "get_channel_info"
-	CmdGetChannelWithInvite CommandType = "get_channel_with_invite"
-	CmdListMyChannels       CommandType = "list_my_channels"
-	CmdFollowChannel        CommandType = "follow_channel"
-	CmdUnfollowChannel      CommandType = "unfollow_channel"
-	CmdMuteChannel          CommandType = "mute_channel"
-	CmdUnmuteChannel        CommandType = "unmute_channel"
+	CmdCreateChannel          CommandType = "create_channel"
+	CmdGetChannelInfo         CommandType = "get_channel_info"
+	CmdGetChannelWithInvite   CommandType = "get_channel_with_invite"
+	CmdListMyChannels         CommandType = "list_my_channels"
+	CmdFollowChannel          CommandType = "follow_channel"
+	CmdUnfollowChannel        CommandType = "unfollow_channel"
+	CmdMuteChannel            CommandType = "mute_channel"
+	CmdUnmuteChannel          CommandType = "unmute_channel"
+	CmdUpdateNewsletterPicture CommandType = "update_newsletter_picture"
 )
 
 // Worker represents a worker instance
@@ -330,4 +331,5 @@ type NewsletterServiceInterface interface {
 	UnfollowChannel(userID, jid string) error
 	MuteChannel(userID, jid string) error
 	UnmuteChannel(userID, jid string) error
+	UpdateNewsletterPictureFromURL(userID, jid, imageURL string) (string, error)
 }

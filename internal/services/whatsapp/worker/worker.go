@@ -293,6 +293,8 @@ func (w *Worker) processTask(task Task) {
 		response = w.handleMuteChannel(task.Payload.(ChannelJIDPayload))
 	case CmdUnmuteChannel:
 		response = w.handleUnmuteChannel(task.Payload.(ChannelJIDPayload))
+	case CmdUpdateNewsletterPicture:
+		response = w.handleUpdateNewsletterPicture(task.Payload.(UpdateNewsletterPicturePayload))
 
 	default:
 		response = CommandResponse{
@@ -717,4 +719,15 @@ func (w *Worker) handleUnmuteChannel(payload ChannelJIDPayload) CommandResponse 
 		return CommandResponse{Error: fmt.Errorf("falha ao reativar notificações do canal: %w", err)}
 	}
 	return CommandResponse{Data: "notificações do canal reativadas com sucesso"}
+}
+
+func (w *Worker) handleUpdateNewsletterPicture(payload UpdateNewsletterPicturePayload) CommandResponse {
+	pictureID, err := w.newsletterService.UpdateNewsletterPictureFromURL(w.UserID, payload.JID, payload.ImageURL)
+	if err != nil {
+		return CommandResponse{Error: fmt.Errorf("falha ao atualizar foto da newsletter: %w", err)}
+	}
+	return CommandResponse{Data: map[string]interface{}{
+		"message":    "foto da newsletter atualizada",
+		"picture_id": pictureID,
+	}}
 }
