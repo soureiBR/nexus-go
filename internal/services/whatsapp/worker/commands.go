@@ -101,6 +101,10 @@ type GetCommunityInviteLinkPayload struct {
 	CommunityJID string `json:"community_jid"`
 }
 
+type GetCommunityLinkedGroupsPayload struct {
+	CommunityJID string `json:"community_jid"`
+}
+
 // Group payload structures
 type CreateGroupPayload struct {
 	Name         string   `json:"name"`

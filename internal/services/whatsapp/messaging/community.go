@@ -622,6 +622,62 @@ func (cs *CommunityService) UnlinkGroupFromCommunity(userID, communityJID, group
 	return nil
 }
 
+// GetCommunityLinkedGroups obtém todos os grupos vinculados a uma comunidade
+func (cs *CommunityService) GetCommunityLinkedGroups(userID, communityJID string) (interface{}, error) {
+	client, err := cs.getClient(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Converter para JID de comunidade
+	communityID, err := types.ParseJID(communityJID)
+	if err != nil {
+		return nil, fmt.Errorf("JID de comunidade inválido: %w", err)
+	}
+
+	// Verificar se é realmente uma comunidade
+	if communityID.Server != types.GroupServer {
+		return nil, fmt.Errorf("JID não é uma comunidade: %s", communityJID)
+	}
+
+	// Obter subgrupos da comunidade
+	subGroups, err := client.GetSubGroups(communityID)
+	if err != nil {
+		return nil, fmt.Errorf("falha ao obter grupos vinculados da comunidade: %w", err)
+	}
+
+	// Processar grupos vinculados
+	linkedGroups := make([]map[string]interface{}, 0)
+
+	for _, subGroup := range subGroups {
+		groupData := map[string]interface{}{
+			"jid":                  subGroup.JID.String(),
+			"name":                 subGroup.Name,
+			"is_default_subgroup": subGroup.IsDefaultSubGroup,
+		}
+
+		// Obter informações adicionais do grupo se necessário
+		if groupInfo, err := cs.GetGroupInfo(userID, subGroup.JID.String()); err == nil {
+			groupData["topic"] = groupInfo.Topic
+			groupData["creator"] = groupInfo.Creator
+			groupData["participant_count"] = len(groupInfo.Participants)
+		}
+
+		linkedGroups = append(linkedGroups, groupData)
+	}
+
+	logger.Debug("Grupos vinculados da comunidade obtidos",
+		"user_id", userID,
+		"community_jid", communityJID,
+		"linked_groups_count", len(linkedGroups))
+
+	return map[string]interface{}{
+		"community_jid":   communityJID,
+		"linked_groups":   linkedGroups,
+		"total_groups":    len(linkedGroups),
+	}, nil
+}
+
 // validateAndProcessParticipantNumber validates and processes participant phone numbers
 func (cs *CommunityService) validateAndProcessParticipantNumber(userID, phoneNumber string) (string, error) {
 	// Clean the input

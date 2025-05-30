@@ -118,6 +118,7 @@ const (
 	CmdGetCommunityInviteLink     CommandType = "get_community_invite_link"
 	CmdRevokeCommunityInviteLink  CommandType = "revoke_community_invite_link"
 	CmdJoinCommunityWithLink      CommandType = "join_community_with_link"
+	CmdGetCommunityLinkedGroups   CommandType = "get_community_linked_groups"
 
 	// Group commands
 	CmdCreateGroup              CommandType = "create_group"
@@ -280,8 +281,10 @@ type CommunityServiceInterface interface {
 	GetCommunityInfo(userID, communityJID string) (interface{}, error)
 	UpdateCommunityName(userID, communityJID, newName string) error
 	UpdateCommunityDescription(userID, communityJID, newDescription string) error
+	UpdateCommunityPictureFromURL(userID, communityJID, imageURL string) (string, error)
 	LeaveCommunity(userID, communityJID string) error
 	GetJoinedCommunities(userID string) (interface{}, error)
+	GetCommunityLinkedGroups(userID, communityJID string) (interface{}, error)
 	CreateGroupForCommunity(userID, communityJID, groupName string, participants []string) (interface{}, error)
 	LinkGroupToCommunity(userID, communityJID, groupJID string) error
 	UnlinkGroupFromCommunity(userID, communityJID, groupJID string) error
@@ -301,6 +304,7 @@ type GroupServiceInterface interface {
 	DemoteGroupParticipants(userID, groupJID string, participants []string) error
 	UpdateGroupName(userID, groupJID, newName string) error
 	UpdateGroupTopic(userID, groupJID, newTopic string) error
+	UpdateGroupPictureFromURL(userID, groupJID, imageURL string) (string, error)
 	LeaveGroup(userID, groupJID string) error
 	JoinGroupWithLink(userID, link string) (interface{}, error)
 	GetGroupInviteLink(userID, groupJID string) (string, error)

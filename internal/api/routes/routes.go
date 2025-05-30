@@ -97,6 +97,7 @@ func SetupRoutes(
 		community.POST("/join", communityHandler.JoinCommunityWithLink)
 		community.GET("/invite-link", communityHandler.GetCommunityInviteLink)
 		community.POST("/invite-link/revoke", communityHandler.RevokeCommunityInviteLink)
+		community.GET("/linked-groups", communityHandler.GetCommunityLinkedGroups)
 	}
 
 	// Configuração de webhook

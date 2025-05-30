@@ -241,6 +241,8 @@ func (w *Worker) processTask(task Task) {
 		response = w.handleGetCommunityInviteLink(task.Payload.(GetCommunityInviteLinkPayload))
 	case CmdRevokeCommunityInviteLink:
 		response = w.handleRevokeCommunityInviteLink(task.Payload.(GetCommunityInviteLinkPayload))
+	case CmdGetCommunityLinkedGroups:
+		response = w.handleGetCommunityLinkedGroups(task.Payload.(GetCommunityLinkedGroupsPayload))
 	case CmdJoinCommunityWithLink:
 		response = w.handleJoinCommunityWithLink(task.Payload.(JoinCommunityWithLinkPayload))
 
@@ -518,6 +520,14 @@ func (w *Worker) handleRevokeCommunityInviteLink(payload GetCommunityInviteLinkP
 		return CommandResponse{Error: fmt.Errorf("falha ao revogar link de convite da comunidade: %w", err)}
 	}
 	return CommandResponse{Data: link}
+}
+
+func (w *Worker) handleGetCommunityLinkedGroups(payload GetCommunityLinkedGroupsPayload) CommandResponse {
+	result, err := w.communityService.GetCommunityLinkedGroups(w.UserID, payload.CommunityJID)
+	if err != nil {
+		return CommandResponse{Error: fmt.Errorf("falha ao obter grupos vinculados da comunidade: %w", err)}
+	}
+	return CommandResponse{Data: result}
 }
 
 func (w *Worker) handleJoinCommunityWithLink(payload JoinCommunityWithLinkPayload) CommandResponse {

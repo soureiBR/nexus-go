@@ -67,6 +67,10 @@ type GetCommunityInviteLinkRequest struct {
 	CommunityJID string `json:"community_jid" binding:"required"`
 }
 
+type GetCommunityLinkedGroupsRequest struct {
+	CommunityJID string `json:"community_jid" binding:"required"`
+}
+
 type RevokeCommunityInviteLinkRequest struct {
 	CommunityJID string `json:"community_jid" binding:"required"`
 }
@@ -332,44 +336,7 @@ func (h *CommunityHandler) UpdateCommunityDescription(c *gin.Context) {
 	})
 }
 
-// UpdateCommunityPicture atualiza a foto da comunidade
-func (h *CommunityHandler) UpdateCommunityPicture(c *gin.Context) {
-	userID, exists := c.Get("userID")
-	if !exists {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
-		return
-	}
 
-	userIDStr := userID.(string)
-
-	var req UpdateCommunityPictureRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
-		return
-	}
-
-	// Create payload
-	payload := worker.UpdateCommunityPicturePayload{
-		CommunityJID: req.CommunityJID,
-		PictureURL:   req.PictureURL,
-	}
-
-	// Submit task to worker
-	_, err := h.submitWorkerTask(userIDStr, worker.CmdUpdateCommunityPicture, payload)
-	if err != nil {
-		logger.Error("Falha ao atualizar foto da comunidade",
-			"error", err,
-			"user_id", userIDStr,
-			"community_jid", req.CommunityJID)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao atualizar foto da comunidade", "details": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "Foto da comunidade atualizada com sucesso",
-	})
-}
 
 // LeaveCommunity sai de uma comunidade
 func (h *CommunityHandler) LeaveCommunity(c *gin.Context) {
@@ -674,7 +641,7 @@ func (h *CommunityHandler) UpdateCommunityPicture(c *gin.Context) {
 	// Create payload
 	payload := worker.UpdateCommunityPicturePayload{
 		CommunityJID: req.CommunityJID,
-		PictureURL:   req.PictureURL,
+		ImageURL:     req.PictureURL,
 	}
 
 	// Submit task to worker
@@ -692,5 +659,55 @@ func (h *CommunityHandler) UpdateCommunityPicture(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Foto da comunidade atualizada com sucesso",
+	})
+}
+
+// GetCommunityLinkedGroups obtém todos os grupos vinculados a uma comunidade
+func (h *CommunityHandler) GetCommunityLinkedGroups(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
+		return
+	}
+
+	userIDStr := userID.(string)
+
+	var req GetCommunityLinkedGroupsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
+		return
+	}
+
+	// Validate session exists and is connected
+	session, exists := h.sessionManager.GetSession(userIDStr)
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Sessão não encontrada"})
+		return
+	}
+
+	if !session.IsActive() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Sessão não está ativa ou conectada"})
+		return
+	}
+
+	// Create payload
+	payload := worker.GetCommunityLinkedGroupsPayload{
+		CommunityJID: req.CommunityJID,
+	}
+
+	// Submit task to worker
+	result, err := h.submitWorkerTask(userIDStr, worker.CmdGetCommunityLinkedGroups, payload)
+	if err != nil {
+		logger.Error("Falha ao obter grupos vinculados da comunidade",
+			"error", err,
+			"user_id", userIDStr,
+			"community_jid", req.CommunityJID)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao obter grupos vinculados da comunidade", "details": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    result,
 	})
 }
