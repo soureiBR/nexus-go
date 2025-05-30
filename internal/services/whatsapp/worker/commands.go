@@ -73,6 +73,11 @@ type UpdateCommunityDescriptionPayload struct {
 	NewDescription string `json:"new_description"`
 }
 
+type UpdateCommunityPicturePayload struct {
+	CommunityJID string `json:"community_jid"`
+	ImageURL     string `json:"image_url"`
+}
+
 type LeaveCommunityPayload struct {
 	CommunityJID string `json:"community_jid"`
 }
@@ -119,6 +124,11 @@ type UpdateGroupNamePayload struct {
 type UpdateGroupTopicPayload struct {
 	GroupJID string `json:"group_jid"`
 	NewTopic string `json:"new_topic"`
+}
+
+type UpdateGroupPicturePayload struct {
+	GroupJID string `json:"group_jid"`
+	ImageURL string `json:"image_url"`
 }
 
 type LeaveGroupPayload struct {

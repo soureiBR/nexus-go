@@ -225,6 +225,8 @@ func (w *Worker) processTask(task Task) {
 		response = w.handleUpdateCommunityName(task.Payload.(UpdateCommunityNamePayload))
 	case CmdUpdateCommunityDescription:
 		response = w.handleUpdateCommunityDescription(task.Payload.(UpdateCommunityDescriptionPayload))
+	case CmdUpdateCommunityPicture:
+		response = w.handleUpdateCommunityPicture(task.Payload.(UpdateCommunityPicturePayload))
 	case CmdLeaveCommunity:
 		response = w.handleLeaveCommunity(task.Payload.(LeaveCommunityPayload))
 	case CmdGetJoinedCommunities:
@@ -261,6 +263,8 @@ func (w *Worker) processTask(task Task) {
 		response = w.handleUpdateGroupName(task.Payload.(UpdateGroupNamePayload))
 	case CmdUpdateGroupTopic:
 		response = w.handleUpdateGroupTopic(task.Payload.(UpdateGroupTopicPayload))
+	case CmdUpdateGroupPicture:
+		response = w.handleUpdateGroupPicture(task.Payload.(UpdateGroupPicturePayload))
 	case CmdLeaveGroup:
 		response = w.handleLeaveGroup(task.Payload.(LeaveGroupPayload))
 	case CmdJoinGroupWithLink:
@@ -449,6 +453,17 @@ func (w *Worker) handleUpdateCommunityDescription(payload UpdateCommunityDescrip
 	return CommandResponse{Data: "descrição da comunidade atualizada"}
 }
 
+func (w *Worker) handleUpdateCommunityPicture(payload UpdateCommunityPicturePayload) CommandResponse {
+	pictureID, err := w.communityService.UpdateCommunityPictureFromURL(w.UserID, payload.CommunityJID, payload.ImageURL)
+	if err != nil {
+		return CommandResponse{Error: fmt.Errorf("falha ao atualizar foto da comunidade: %w", err)}
+	}
+	return CommandResponse{Data: map[string]interface{}{
+		"message":    "foto da comunidade atualizada",
+		"picture_id": pictureID,
+	}}
+}
+
 func (w *Worker) handleLeaveCommunity(payload LeaveCommunityPayload) CommandResponse {
 	err := w.communityService.LeaveCommunity(w.UserID, payload.CommunityJID)
 	if err != nil {
@@ -584,6 +599,17 @@ func (w *Worker) handleUpdateGroupTopic(payload UpdateGroupTopicPayload) Command
 		return CommandResponse{Error: fmt.Errorf("falha ao atualizar tópico do grupo: %w", err)}
 	}
 	return CommandResponse{Data: "tópico do grupo atualizado"}
+}
+
+func (w *Worker) handleUpdateGroupPicture(payload UpdateGroupPicturePayload) CommandResponse {
+	pictureID, err := w.groupService.UpdateGroupPictureFromURL(w.UserID, payload.GroupJID, payload.ImageURL)
+	if err != nil {
+		return CommandResponse{Error: fmt.Errorf("falha ao atualizar foto do grupo: %w", err)}
+	}
+	return CommandResponse{Data: map[string]interface{}{
+		"message":    "foto do grupo atualizada",
+		"picture_id": pictureID,
+	}}
 }
 
 func (w *Worker) handleLeaveGroup(payload LeaveGroupPayload) CommandResponse {

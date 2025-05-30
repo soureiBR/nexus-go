@@ -68,6 +68,12 @@ type UpdateGroupTopicRequest struct {
 	NewTopic string `json:"new_topic" binding:"required"`
 }
 
+// UpdateGroupPictureRequest representa a requisição para atualizar foto do grupo
+type UpdateGroupPictureRequest struct {
+	GroupJID string `json:"group_jid" binding:"required"`
+	ImageURL string `json:"image_url" binding:"required"`
+}
+
 // LeaveGroupRequest representa a requisição para sair de um grupo
 type LeaveGroupRequest struct {
 	GroupJID string `json:"group_jid" binding:"required"`
@@ -496,6 +502,46 @@ func (h *GroupHandler) UpdateGroupTopic(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Tópico do grupo atualizado com sucesso",
+	})
+}
+
+// UpdateGroupPicture atualiza a foto do grupo
+func (h *GroupHandler) UpdateGroupPicture(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
+		return
+	}
+
+	userIDStr := userID.(string)
+
+	var req UpdateGroupPictureRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
+		return
+	}
+
+	// Create payload
+	payload := worker.UpdateGroupPicturePayload{
+		GroupJID: req.GroupJID,
+		ImageURL: req.ImageURL,
+	}
+
+	// Submit task to worker
+	result, err := h.submitWorkerTask(userIDStr, worker.CmdUpdateGroupPicture, payload)
+	if err != nil {
+		logger.Error("Falha ao atualizar foto do grupo",
+			"error", err,
+			"user_id", userIDStr,
+			"group_jid", req.GroupJID)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao atualizar foto do grupo", "details": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Foto do grupo atualizada com sucesso",
+		"data":    result,
 	})
 }
 

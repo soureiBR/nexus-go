@@ -3,6 +3,8 @@ package messaging
 
 import (
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 
 	"go.mau.fi/whatsmeow"
@@ -253,6 +255,51 @@ func (cs *CommunityService) UpdateCommunityDescription(userID, communityJID, new
 		"new_description", newDescription)
 
 	return nil
+}
+
+// UpdateCommunityPictureFromURL updates the community picture from a URL
+func (cs *CommunityService) UpdateCommunityPictureFromURL(userID, communityJID, imageURL string) (string, error) {
+	client, err := cs.getClient(userID)
+	if err != nil {
+		return "", err
+	}
+
+	// Converter para JID
+	jid, err := types.ParseJID(communityJID)
+	if err != nil {
+		return "", fmt.Errorf("JID de comunidade inválido: %w", err)
+	}
+
+	// Verificar se é realmente uma comunidade
+	if jid.Server != types.GroupServer {
+		return "", fmt.Errorf("JID não é uma comunidade: %s", communityJID)
+	}
+
+	// Download the image from URL
+	resp, err := http.Get(imageURL)
+	if err != nil {
+		return "", fmt.Errorf("falha ao baixar imagem da URL: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read the image data
+	imageData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("falha ao ler dados da imagem: %w", err)
+	}
+
+	// Set the community photo
+	pictureID, err := client.SetGroupPhoto(jid, imageData)
+	if err != nil {
+		return "", fmt.Errorf("falha ao atualizar foto da comunidade: %w", err)
+	}
+
+	logger.Debug("Foto da comunidade atualizada",
+		"user_id", userID,
+		"community_jid", communityJID,
+		"picture_id", pictureID)
+
+	return pictureID, nil
 }
 
 // LeaveCommunity sai de uma comunidade

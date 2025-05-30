@@ -3,6 +3,8 @@ package messaging
 
 import (
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"time"
 
@@ -511,6 +513,59 @@ func (gs *GroupService) UpdateGroupTopic(userID, groupJID, newTopic string) erro
 		"group_jid", groupJID)
 
 	return nil
+}
+
+// UpdateGroupPictureFromURL updates the group picture from a URL
+func (gs *GroupService) UpdateGroupPictureFromURL(userID, groupJID, imageURL string) (string, error) {
+	client, exists := gs.groupManager.GetSession(userID)
+	if !exists {
+		return "", fmt.Errorf("sessão não encontrada: %s", userID)
+	}
+
+	if !client.IsConnected() {
+		return "", fmt.Errorf("sessão não conectada: %s", userID)
+	}
+
+	// Atualizar atividade
+	client.UpdateActivity()
+
+	// Converter para JID do grupo
+	groupID, err := types.ParseJID(groupJID)
+	if err != nil {
+		return "", fmt.Errorf("JID de grupo inválido: %w", err)
+	}
+
+	// Verificar se é realmente um grupo
+	if groupID.Server != types.GroupServer {
+		return "", fmt.Errorf("JID não é um grupo: %s", groupJID)
+	}
+
+	// Download the image from URL
+	resp, err := http.Get(imageURL)
+	if err != nil {
+		return "", fmt.Errorf("falha ao baixar imagem da URL: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read the image data
+	imageData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("falha ao ler dados da imagem: %w", err)
+	}
+
+	// Set the group photo
+	pictureID, err := client.GetWAClient().SetGroupPhoto(groupID, imageData)
+	if err != nil {
+		return "", fmt.Errorf("falha ao atualizar foto do grupo: %w", err)
+	}
+
+	// Log
+	logger.Debug("Foto do grupo atualizada",
+		"user_id", userID,
+		"group_jid", groupJID,
+		"picture_id", pictureID)
+
+	return pictureID, nil
 }
 
 // LeaveGroup sai de um grupo
