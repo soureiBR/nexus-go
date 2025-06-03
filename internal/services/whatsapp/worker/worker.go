@@ -303,6 +303,10 @@ func (w *Worker) processTask(task Task) {
 		response = w.handleUnmuteChannel(task.Payload.(ChannelJIDPayload))
 	case CmdUpdateNewsletterPicture:
 		response = w.handleUpdateNewsletterPicture(task.Payload.(UpdateNewsletterPicturePayload))
+	case CmdUpdateNewsletterName:
+		response = w.handleUpdateNewsletterName(task.Payload.(UpdateNewsletterNamePayload))
+	case CmdUpdateNewsletterDescription:
+		response = w.handleUpdateNewsletterDescription(task.Payload.(UpdateNewsletterDescriptionPayload))
 
 	default:
 		response = CommandResponse{
@@ -771,4 +775,20 @@ func (w *Worker) handleUpdateNewsletterPicture(payload UpdateNewsletterPicturePa
 		"message":    "foto da newsletter atualizada",
 		"picture_id": pictureID,
 	}}
+}
+
+func (w *Worker) handleUpdateNewsletterName(payload UpdateNewsletterNamePayload) CommandResponse {
+	err := w.newsletterService.UpdateNewsletterName(w.UserID, payload.JID, payload.Name)
+	if err != nil {
+		return CommandResponse{Error: fmt.Errorf("falha ao atualizar nome da newsletter: %w", err)}
+	}
+	return CommandResponse{Data: "nome da newsletter atualizado com sucesso"}
+}
+
+func (w *Worker) handleUpdateNewsletterDescription(payload UpdateNewsletterDescriptionPayload) CommandResponse {
+	err := w.newsletterService.UpdateNewsletterDescription(w.UserID, payload.JID, payload.Description)
+	if err != nil {
+		return CommandResponse{Error: fmt.Errorf("falha ao atualizar descrição da newsletter: %w", err)}
+	}
+	return CommandResponse{Data: "descrição da newsletter atualizada com sucesso"}
 }

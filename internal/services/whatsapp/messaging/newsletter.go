@@ -2,6 +2,8 @@
 package messaging
 
 import (
+	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -9,12 +11,16 @@ import (
 	"time"
 
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/binary"
 	"go.mau.fi/whatsmeow/types"
 
 	"yourproject/internal/services/whatsapp/extensions"
 	"yourproject/internal/services/whatsapp/session"
 	"yourproject/pkg/logger"
 )
+
+// Newsletter mutation query ID (discovered through WhatsApp Web traffic analysis)
+const mutationUpdateNewsletterQueryID = "7150902998257522"
 
 // NewsletterService encapsula a funcionalidade de newsletters (canais) do WhatsApp
 type NewsletterService struct {
@@ -50,7 +56,404 @@ func (s *NewsletterService) getClient(userID string) (*whatsmeow.Client, error) 
 	return waClient, nil
 }
 
-// CreateChannel cria um novo canal do WhatsApp com o nome, descrição e imagem opcional
+// updateNewsletterViaMex sends a newsletter update using MEX (GraphQL-like queries)
+func (s *NewsletterService) updateNewsletterViaMex(client *whatsmeow.Client, ctx context.Context, newsletterJID, name string) error {
+	internals := client.DangerousInternals()
+	
+	// Prepare variables for the GraphQL query
+	variables := map[string]interface{}{
+		"newsletter_id": newsletterJID,
+		"updates": map[string]interface{}{
+			"name": name,
+		},
+	}
+	
+	// Use the confirmed working query ID for newsletter updates
+	queryID := mutationUpdateNewsletterQueryID
+	
+	result, err := internals.SendMexIQ(ctx, queryID, variables)
+	if err != nil {
+		return fmt.Errorf("MEX query failed: %w", err)
+	}
+	
+	logger.Debug("MEX query succeeded", 
+		"query_id", queryID, 
+		"result", string(result),
+		"newsletter_jid", newsletterJID)
+	return nil
+}
+
+// updateNewsletterViaIQ sends a newsletter update using direct IQ
+func (s *NewsletterService) updateNewsletterViaIQ(client *whatsmeow.Client, ctx context.Context, newsletterJID, name string) error {
+	internals := client.DangerousInternals()
+	
+	// Parse the newsletter JID
+	parsedJID, err := types.ParseJID(newsletterJID)
+	if err != nil {
+		return fmt.Errorf("invalid newsletter JID: %w", err)
+	}
+	
+	// Build update nodes
+	updateNodes := []binary.Node{
+		{
+			Tag:     "name",
+			Content: name,
+		},
+	}
+	
+	// Try different namespaces and tags
+	namespaces := []string{"newsletter", "w:newsletter", "channel", "meta"}
+	tags := []string{"update", "set", "modify", "edit"}
+	
+	for _, namespace := range namespaces {
+		for _, tag := range tags {
+			// Create IQ query
+			query := whatsmeow.DangerousInfoQuery{
+				Namespace: namespace,
+				Type:      "set",
+				To:        parsedJID,
+				Content: []binary.Node{{
+					Tag:     tag,
+					Content: updateNodes,
+				}},
+				Context: ctx,
+			}
+			
+			resp, err := internals.SendIQ(query)
+			if err != nil {
+				logger.Debug("IQ attempt failed", 
+					"namespace", namespace, 
+					"tag", tag, 
+					"error", err,
+					"newsletter_jid", newsletterJID)
+				continue
+			}
+			
+			logger.Debug("IQ attempt succeeded", 
+				"namespace", namespace, 
+				"tag", tag, 
+				"response", resp,
+				"newsletter_jid", newsletterJID)
+			return nil
+		}
+	}
+	
+	return fmt.Errorf("all IQ namespace/tag combinations failed")
+}
+
+// updateNewsletterViaRawNodes sends a newsletter update using raw binary nodes
+func (s *NewsletterService) updateNewsletterViaRawNodes(client *whatsmeow.Client, ctx context.Context, newsletterJID, name string) error {
+	internals := client.DangerousInternals()
+	
+	parsedJID, err := types.ParseJID(newsletterJID)
+	if err != nil {
+		return fmt.Errorf("invalid newsletter JID: %w", err)
+	}
+	
+	// Build raw binary node
+	node := binary.Node{
+		Tag: "iq",
+		Attrs: binary.Attrs{
+			"id":    internals.GenerateRequestID(),
+			"type":  "set",
+			"to":    parsedJID.String(),
+			"xmlns": "newsletter",
+		},
+		Content: []binary.Node{{
+			Tag: "update",
+			Content: []binary.Node{
+				{
+					Tag:     "name",
+					Content: name,
+				},
+			},
+		}},
+	}
+	
+	// Send raw node
+	err = internals.SendNode(node)
+	if err != nil {
+		return fmt.Errorf("failed to send raw node: %w", err)
+	}
+	
+	logger.Debug("Raw node sent successfully", 
+		"newsletter_jid", newsletterJID,
+		"name", name)
+	return nil
+}
+
+// updateNewsletterDescriptionViaMex sends a newsletter description update using MEX
+func (s *NewsletterService) updateNewsletterDescriptionViaMex(client *whatsmeow.Client, ctx context.Context, newsletterJID, description string) error {
+	internals := client.DangerousInternals()
+	
+	// Prepare variables for the GraphQL query
+	variables := map[string]interface{}{
+		"newsletter_id": newsletterJID,
+		"updates": map[string]interface{}{
+			"description": description,
+			"settings":    nil,
+		},
+	}
+	
+	// Use the confirmed working query ID for newsletter description updates
+	queryID := mutationUpdateNewsletterQueryID
+	
+	result, err := internals.SendMexIQ(ctx, queryID, variables)
+	if err != nil {
+		return fmt.Errorf("MEX query failed for description: %w", err)
+	}
+	
+	logger.Debug("MEX query succeeded for description", 
+		"query_id", queryID, 
+		"result", string(result),
+		"newsletter_jid", newsletterJID)
+	return nil
+}
+
+// updateNewsletterDescriptionViaIQ sends a newsletter description update using direct IQ
+func (s *NewsletterService) updateNewsletterDescriptionViaIQ(client *whatsmeow.Client, ctx context.Context, newsletterJID, description string) error {
+	internals := client.DangerousInternals()
+	
+	// Parse the newsletter JID
+	parsedJID, err := types.ParseJID(newsletterJID)
+	if err != nil {
+		return fmt.Errorf("invalid newsletter JID: %w", err)
+	}
+	
+	// Build update nodes
+	updateNodes := []binary.Node{
+		{
+			Tag:     "description",
+			Content: description,
+		},
+	}
+	
+	// Try different namespaces and tags
+	namespaces := []string{"newsletter", "w:newsletter", "channel", "meta"}
+	tags := []string{"update", "set", "modify", "edit"}
+	
+	for _, namespace := range namespaces {
+		for _, tag := range tags {
+			// Create IQ query
+			query := whatsmeow.DangerousInfoQuery{
+				Namespace: namespace,
+				Type:      "set",
+				To:        parsedJID,
+				Content: []binary.Node{{
+					Tag:     tag,
+					Content: updateNodes,
+				}},
+				Context: ctx,
+			}
+			
+			resp, err := internals.SendIQ(query)
+			if err != nil {
+				logger.Debug("IQ attempt failed for description", 
+					"namespace", namespace, 
+					"tag", tag, 
+					"error", err,
+					"newsletter_jid", newsletterJID)
+				continue
+			}
+			
+			logger.Debug("IQ attempt succeeded for description", 
+				"namespace", namespace, 
+				"tag", tag, 
+				"response", resp,
+				"newsletter_jid", newsletterJID)
+			return nil
+		}
+	}
+	
+	return fmt.Errorf("all IQ namespace/tag combinations failed for description")
+}
+
+// updateNewsletterDescriptionViaRawNodes sends a newsletter description update using raw binary nodes
+func (s *NewsletterService) updateNewsletterDescriptionViaRawNodes(client *whatsmeow.Client, ctx context.Context, newsletterJID, description string) error {
+	internals := client.DangerousInternals()
+	
+	parsedJID, err := types.ParseJID(newsletterJID)
+	if err != nil {
+		return fmt.Errorf("invalid newsletter JID: %w", err)
+	}
+	
+	// Build raw binary node
+	node := binary.Node{
+		Tag: "iq",
+		Attrs: binary.Attrs{
+			"id":    internals.GenerateRequestID(),
+			"type":  "set",
+			"to":    parsedJID.String(),
+			"xmlns": "newsletter",
+		},
+		Content: []binary.Node{{
+			Tag: "update",
+			Content: []binary.Node{
+				{
+					Tag:     "description",
+					Content: description,
+				},
+			},
+		}},
+	}
+	
+	// Send raw node
+	err = internals.SendNode(node)
+	if err != nil {
+		return fmt.Errorf("failed to send raw node for description: %w", err)
+	}
+	
+	logger.Debug("Raw node sent successfully for description", 
+		"newsletter_jid", newsletterJID,
+		"description", description)
+	return nil
+}
+
+// updateNewsletterViaRawNodesUnified sends a newsletter update using raw binary nodes
+// This unified function accepts both name and description parameters and can update either or both
+func (s *NewsletterService) updateNewsletterViaRawNodesUnified(client *whatsmeow.Client, ctx context.Context, newsletterJID, name, description string) error {
+	internals := client.DangerousInternals()
+	
+	parsedJID, err := types.ParseJID(newsletterJID)
+	if err != nil {
+		return fmt.Errorf("invalid newsletter JID: %w", err)
+	}
+	
+	// Build content nodes based on what's provided
+	var contentNodes []binary.Node
+	
+	if name != "" {
+		contentNodes = append(contentNodes, binary.Node{
+			Tag:     "name",
+			Content: name,
+		})
+	}
+	
+	if description != "" {
+		contentNodes = append(contentNodes, binary.Node{
+			Tag:     "description",
+			Content: description,
+		})
+	}
+	
+	if len(contentNodes) == 0 {
+		return fmt.Errorf("neither name nor description provided")
+	}
+	
+	// Build raw binary node
+	node := binary.Node{
+		Tag: "iq",
+		Attrs: binary.Attrs{
+			"id":    internals.GenerateRequestID(),
+			"type":  "set",
+			"to":    parsedJID.String(),
+			"xmlns": "newsletter",
+		},
+		Content: []binary.Node{{
+			Tag:     "update",
+			Content: contentNodes,
+		}},
+	}
+	
+	// Send raw node
+	err = internals.SendNode(node)
+	if err != nil {
+		return fmt.Errorf("failed to send raw node: %w", err)
+	}
+	
+	logger.Debug("Raw node sent successfully", 
+		"newsletter_jid", newsletterJID,
+		"name", name,
+		"description", description,
+		"content_nodes_count", len(contentNodes))
+	return nil
+}
+
+// updateNewsletterPictureViaMex sends a newsletter picture update using MEX
+func (s *NewsletterService) updateNewsletterPictureViaMex(client *whatsmeow.Client, ctx context.Context, newsletterJID string, imageData []byte) error {
+	internals := client.DangerousInternals()
+	
+	// Converter imagem para base64 (como no Baileys)
+	base64Image := base64.StdEncoding.EncodeToString(imageData)
+	
+	// Usar mesma estrutura do name/description
+	variables := map[string]interface{}{
+		"newsletter_id": newsletterJID,
+		"updates": map[string]interface{}{
+			"picture":  base64Image, // Imagem em base64
+			"settings": nil,
+		},
+	}
+	
+	queryID := mutationUpdateNewsletterQueryID
+	
+	logger.Debug("MEX query para picture - variables completas", 
+		"query_id", queryID, 
+		"newsletter_jid", newsletterJID,
+		"image_size_bytes", len(imageData),
+		"base64_length", len(base64Image))
+	
+	result, err := internals.SendMexIQ(ctx, queryID, variables)
+	if err != nil {
+		logger.Error("MEX query failed for picture", 
+			"error", err,
+			"query_id", queryID, 
+			"newsletter_jid", newsletterJID)
+		return fmt.Errorf("MEX query failed for picture: %w", err)
+	}
+	
+	logger.Debug("MEX query succeeded for picture", 
+		"query_id", queryID, 
+		"result", string(result),
+		"newsletter_jid", newsletterJID)
+	return nil
+}
+
+// updateNewsletterPictureViaRawNodes sends a newsletter picture update using raw binary nodes
+func (s *NewsletterService) updateNewsletterPictureViaRawNodes(client *whatsmeow.Client, ctx context.Context, newsletterJID string, imageData []byte) error {
+	internals := client.DangerousInternals()
+	
+	parsedJID, err := types.ParseJID(newsletterJID)
+	if err != nil {
+		return fmt.Errorf("invalid newsletter JID: %w", err)
+	}
+	
+	// Converter imagem para base64
+	base64Image := base64.StdEncoding.EncodeToString(imageData)
+	
+	// Build raw binary node
+	node := binary.Node{
+		Tag: "iq",
+		Attrs: binary.Attrs{
+			"id":    internals.GenerateRequestID(),
+			"type":  "set",
+			"to":    parsedJID.String(),
+			"xmlns": "newsletter",
+		},
+		Content: []binary.Node{{
+			Tag: "update",
+			Content: []binary.Node{
+				{
+					Tag:     "picture",
+					Content: base64Image,
+				},
+			},
+		}},
+	}
+	
+	// Send raw node
+	err = internals.SendNode(node)
+	if err != nil {
+		return fmt.Errorf("failed to send raw node for picture: %w", err)
+	}
+	
+	logger.Debug("Raw node sent successfully for picture", 
+		"newsletter_jid", newsletterJID,
+		"image_size_bytes", len(imageData),
+		"base64_length", len(base64Image))
+	return nil
+}
+
 func (s *NewsletterService) CreateChannel(userID, name, description, pictureURL string) (interface{}, error) {
 	client, err := s.getClient(userID)
 	if err != nil {
@@ -318,23 +721,185 @@ func (s *NewsletterService) UpdateNewsletterPictureFromURL(userID, jid, imageURL
 		"jpeg_size", len(jpegData),
 		"jpeg_magic_bytes", fmt.Sprintf("%X %X", jpegData[0], jpegData[1]))
 
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	logger.Debug("Tentando atualizar foto da newsletter usando múltiplas abordagens",
+		"user_id", userID,
+		"newsletter_jid", jid,
+		"image_size", len(jpegData))
+
+	// Try different methods in order of probability of success
+	methods := []struct {
+		name string
+		fn   func(*whatsmeow.Client, context.Context, string, []byte) error
+	}{
+		{"MEX GraphQL", s.updateNewsletterPictureViaMex},
+		{"Raw Nodes", s.updateNewsletterPictureViaRawNodes},
+	}
+
+	for _, method := range methods {
+		logger.Debug("Tentando método para picture", "method", method.name, "newsletter_jid", jid)
+		err := method.fn(client, ctx, parsedJID.String(), jpegData)
+		
+		if err == nil {
+			logger.Debug("Foto da newsletter atualizada com sucesso",
+				"method", method.name,
+				"user_id", userID,
+				"newsletter_jid", jid,
+				"image_size", len(jpegData))
+			return "picture_updated", nil
+		}
+		
+		logger.Debug("Método falhou, tentando próximo",
+			"method", method.name,
+			"error", err,
+			"newsletter_jid", jid)
+	}
+
+	// If MEX and raw nodes fail, try the traditional extension method as fallback
+	logger.Debug("Métodos MEX e Raw Nodes falharam, tentando método de extensão",
+		"user_id", userID,
+		"newsletter_jid", jid)
+
 	// Set the newsletter photo using custom extension
 	pictureID, err := extensions.SetNewsletterPhoto(client, parsedJID, jpegData)
 	if err != nil {
-		logger.Error("Falha ao definir foto da newsletter no WhatsApp",
+		logger.Error("Todos os métodos falharam ao atualizar foto da newsletter",
 			"error", err,
 			"user_id", userID,
 			"newsletter_jid", jid)
-		return "", fmt.Errorf("falha ao atualizar foto da newsletter: %w", err)
+		return "", fmt.Errorf("todos os métodos falharam ao atualizar foto da newsletter: %w", err)
 	}
 
 	// Log success
-	logger.Debug("Foto da newsletter atualizada com sucesso",
+	logger.Debug("Foto da newsletter atualizada com sucesso usando método de extensão",
 		"user_id", userID,
 		"newsletter_jid", jid,
 		"picture_id", pictureID)
 
 	return pictureID, nil
+}
+
+// UpdateNewsletterName updates the newsletter name using multiple approaches
+func (s *NewsletterService) UpdateNewsletterName(userID, jid, name string) error {
+	client, err := s.getClient(userID)
+	if err != nil {
+		return err
+	}
+
+	// Parse JID
+	parsedJID, err := types.ParseJID(jid)
+	if err != nil {
+		return fmt.Errorf("JID inválido: %w", err)
+	}
+
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	logger.Debug("Tentando atualizar nome da newsletter usando múltiplas abordagens",
+		"user_id", userID,
+		"newsletter_jid", jid,
+		"name", name)
+
+	// Try different methods in order of probability of success
+	methods := []struct {
+		name string
+		fn   func(*whatsmeow.Client, context.Context, string, string) error
+	}{
+		{"MEX GraphQL", s.updateNewsletterViaMex},
+		{"IQ Direct", s.updateNewsletterViaIQ},
+		{"Raw Nodes", s.updateNewsletterViaRawNodes},
+	}
+
+	for _, method := range methods {
+		logger.Debug("Tentando método", "method", method.name, "newsletter_jid", jid)
+		err := method.fn(client, ctx, parsedJID.String(), name)
+		
+		if err == nil {
+			logger.Debug("Nome da newsletter atualizado com sucesso",
+				"method", method.name,
+				"user_id", userID,
+				"newsletter_jid", jid,
+				"name", name)
+			return nil
+		}
+		
+		logger.Debug("Método falhou, tentando próximo",
+			"method", method.name,
+			"error", err,
+			"newsletter_jid", jid)
+	}
+
+	// If all dangerous methods fail, log the failure
+	logger.Error("Todos os métodos falharam ao atualizar nome da newsletter",
+		"user_id", userID,
+		"newsletter_jid", jid,
+		"name", name)
+
+	return fmt.Errorf("todos os métodos falharam ao atualizar nome da newsletter")
+}
+
+// UpdateNewsletterDescription updates the newsletter description using multiple approaches
+func (s *NewsletterService) UpdateNewsletterDescription(userID, jid, description string) error {
+	client, err := s.getClient(userID)
+	if err != nil {
+		return err
+	}
+
+	// Parse JID
+	parsedJID, err := types.ParseJID(jid)
+	if err != nil {
+		return fmt.Errorf("JID inválido: %w", err)
+	}
+
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	logger.Debug("Tentando atualizar descrição da newsletter usando múltiplas abordagens",
+		"user_id", userID,
+		"newsletter_jid", jid,
+		"description", description)
+
+	// Try different methods in order of probability of success
+	methods := []struct {
+		name string
+		fn   func(*whatsmeow.Client, context.Context, string, string) error
+	}{
+		{"MEX GraphQL", s.updateNewsletterDescriptionViaMex},
+		{"IQ Direct", s.updateNewsletterDescriptionViaIQ},
+		{"Raw Nodes", s.updateNewsletterDescriptionViaRawNodes},
+	}
+
+	for _, method := range methods {
+		logger.Debug("Tentando método para descrição", "method", method.name, "newsletter_jid", jid)
+		err := method.fn(client, ctx, parsedJID.String(), description)
+		
+		if err == nil {
+			logger.Debug("Descrição da newsletter atualizada com sucesso",
+				"method", method.name,
+				"user_id", userID,
+				"newsletter_jid", jid,
+				"description", description)
+			return nil
+		}
+		
+		logger.Debug("Método falhou para descrição, tentando próximo",
+			"method", method.name,
+			"error", err,
+			"newsletter_jid", jid)
+	}
+
+	// If all dangerous methods fail, log the failure
+	logger.Error("Todos os métodos falharam ao atualizar descrição da newsletter",
+		"user_id", userID,
+		"newsletter_jid", jid,
+		"description", description)
+
+	return fmt.Errorf("todos os métodos falharam ao atualizar descrição da newsletter")
 }
 
 // validateAndProcessParticipantNumber validates and processes participant phone numbers

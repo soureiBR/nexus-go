@@ -191,3 +191,13 @@ type UpdateNewsletterPicturePayload struct {
 	JID      string `json:"jid"`
 	ImageURL string `json:"image_url"`
 }
+
+type UpdateNewsletterNamePayload struct {
+	JID  string `json:"jid"`
+	Name string `json:"name"`
+}
+
+type UpdateNewsletterDescriptionPayload struct {
+	JID         string `json:"jid"`
+	Description string `json:"description"`
+}

@@ -150,6 +150,8 @@ const (
 	CmdMuteChannel            CommandType = "mute_channel"
 	CmdUnmuteChannel          CommandType = "unmute_channel"
 	CmdUpdateNewsletterPicture CommandType = "update_newsletter_picture"
+	CmdUpdateNewsletterName    CommandType = "update_newsletter_name"
+	CmdUpdateNewsletterDescription CommandType = "update_newsletter_description"
 )
 
 // Worker represents a worker instance
@@ -340,4 +342,6 @@ type NewsletterServiceInterface interface {
 	MuteChannel(userID, jid string) error
 	UnmuteChannel(userID, jid string) error
 	UpdateNewsletterPictureFromURL(userID, jid, imageURL string) (string, error)
+	UpdateNewsletterName(userID, jid, name string) error
+	UpdateNewsletterDescription(userID, jid, description string) error
 }

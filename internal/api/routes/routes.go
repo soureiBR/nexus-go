@@ -102,6 +102,8 @@ func SetupRoutes(
 		newsletter.POST("/mute", newsletterHandler.MuteChannel)
 		newsletter.POST("/unmute", newsletterHandler.UnmuteChannel)
 		newsletter.POST("/update/picture", newsletterHandler.UpdateNewsletterPicture)
+		newsletter.POST("/update/name", newsletterHandler.UpdateNewsletterName)
+		newsletter.POST("/update/description", newsletterHandler.UpdateNewsletterDescription)
 	}
 
 	// Rotas de comunidade
