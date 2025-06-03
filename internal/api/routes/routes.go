@@ -72,6 +72,7 @@ func SetupRoutes(
 		group.POST("/create", groupHandler.CreateGroup)
 		group.GET("/info", groupHandler.GetGroupInfo)
 		group.GET("/list", groupHandler.GetJoinedGroups)
+		group.GET("/list/admin", groupHandler.GetAdminGroups)
 		group.POST("/participants/add", groupHandler.AddParticipants)
 		group.POST("/participants/remove", groupHandler.RemoveParticipants)
 		group.POST("/participants/promote", groupHandler.PromoteParticipants)

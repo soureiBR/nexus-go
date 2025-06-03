@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"yourproject/internal/services/whatsapp"
+	"yourproject/internal/services/whatsapp/messaging"
 	"yourproject/internal/services/whatsapp/worker"
 	"yourproject/pkg/logger"
 )
@@ -292,6 +293,79 @@ func (h *GroupHandler) GetJoinedGroups(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    result,
+	})
+}
+
+// GetAdminGroups obtém lista de grupos onde o usuário é administrador
+func (h *GroupHandler) GetAdminGroups(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "User ID not found in context"})
+		return
+	}
+
+	userIDStr := userID.(string)
+
+	// Submit task to worker to get all joined groups
+	result, err := h.submitWorkerTask(userIDStr, worker.CmdGetJoinedGroups, nil)
+	if err != nil {
+		logger.Error("Falha ao obter lista de grupos", "error", err, "user_id", userIDStr)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao obter lista de grupos", "details": err.Error()})
+		return
+	}
+
+	// Get user's session to get their JID
+	session, exists := h.sessionManager.GetSession(userIDStr)
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Sessão não encontrada"})
+		return
+	}
+
+	if !session.IsActive() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Sessão não está ativa ou conectada"})
+		return
+	}
+
+	// Get user's JID
+	userJID := session.GetWAClient().Store.ID
+	if userJID == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao obter JID do usuário"})
+		return
+	}
+
+	// Convert result to proper type and filter admin groups
+	adminGroups := make([]interface{}, 0)
+	
+	// Handle the result type properly
+	switch groups := result.(type) {
+	case []messaging.GroupInfo:
+		for _, group := range groups {
+			// Check if user is admin in this group
+			isAdmin := false
+			for _, participant := range group.Participants {
+				// Compare JID to see if this participant is the current user and is admin
+				if participant.JID == userJID.String() && (participant.IsAdmin || participant.IsSuperAdmin) {
+					isAdmin = true
+					break
+				}
+			}
+			if isAdmin {
+				adminGroups = append(adminGroups, group)
+			}
+		}
+	default:
+		logger.Error("Unexpected result type from GetJoinedGroups", "type", fmt.Sprintf("%T", result))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Formato de resposta inválido"})
+		return
+	}
+
+	logger.Debug("Lista de grupos administrativos filtrada",
+		"user_id", userIDStr,
+		"admin_groups_count", len(adminGroups))
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    adminGroups,
 	})
 }
 
