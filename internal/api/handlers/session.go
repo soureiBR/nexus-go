@@ -22,11 +22,6 @@ type SessionHandler struct {
 	sessionManager *whatsapp.SessionManager
 }
 
-// CreateSessionRequest representa a requisição para criar uma sessão
-type CreateSessionRequest struct {
-	UserID string `json:"user_id" binding:"required"`
-}
-
 // SessionResponse representa a resposta de uma operação com sessão
 type SessionResponse struct {
 	ID         string `json:"id"`
@@ -54,12 +49,6 @@ func (h *SessionHandler) CreateSession(c *gin.Context) {
 	}
 
 	userIDStr := userID.(string)
-
-	var req CreateSessionRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
-		return
-	}
 
 	// Criar sessão
 	client, err := h.sessionManager.CreateSession(c.Request.Context(), userIDStr)
