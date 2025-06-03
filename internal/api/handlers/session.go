@@ -137,6 +137,208 @@ func (h *SessionHandler) GetSession(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// GetAllSessions retorna informações sobre todas as sessões ativas
+func (h *SessionHandler) GetAllSessions(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User ID not found in context"})
+		return
+	}
+
+	userIDStr := userID.(string)
+	
+	// Para esta implementação, podemos optar por:
+	// 1. Retornar apenas a sessão do usuário autenticado (mais seguro)
+	// 2. Retornar todas as sessões (apenas para admin/debug)
+	
+	// Opção 1: Retornar apenas a sessão do usuário atual
+	client, exists := h.sessionManager.GetSession(userIDStr)
+	if !exists {
+		c.JSON(http.StatusOK, gin.H{
+			"sessions": []interface{}{},
+			"count":    0,
+		})
+		return
+	}
+
+	// Determinar status
+	status := "disconnected"
+	if client.Connected {
+		status = "connected"
+	}
+
+	sessionResp := SessionResponse{
+		ID:        userIDStr,
+		Status:    status,
+		Connected: client.Connected,
+		CreatedAt: client.CreatedAt.Format(time.RFC3339),
+	}
+
+	if !client.LastActive.IsZero() {
+		sessionResp.LastActive = client.LastActive.Format(time.RFC3339)
+	}
+
+	// Obter informações adicionais se conectado
+	if client.Connected && client.WAClient != nil && client.WAClient.Store.ID != nil {
+		ownJID := client.WAClient.Store.ID
+		if !ownJID.IsEmpty() {
+			phoneNumber := ownJID.User
+			sessionResp.PhoneNumber = phoneNumber
+		}
+		myJID := client.WAClient.Store.ID.ToNonAD()
+		pictureInfo, err := client.WAClient.GetProfilePictureInfo(myJID, nil)
+		if err == nil && pictureInfo != nil && pictureInfo.URL != "" {
+			sessionResp.Picture = pictureInfo.URL
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"sessions": []SessionResponse{sessionResp},
+		"count":    1,
+	})
+}
+
+// GetAllSessionsAdmin retorna todas as sessões (apenas para administradores)
+func (h *SessionHandler) GetAllSessionsAdmin(c *gin.Context) {
+	// Esta função pode ser implementada para administradores
+	// que precisam ver todas as sessões do sistema
+	
+	allSessions := h.sessionManager.GetAllSessions()
+	
+	var sessions []SessionResponse
+	for userID, client := range allSessions {
+		status := "disconnected"
+		if client.Connected {
+			status = "connected"
+		}
+
+		sessionResp := SessionResponse{
+			ID:        userID,
+			Status:    status,
+			Connected: client.Connected,
+			CreatedAt: client.CreatedAt.Format(time.RFC3339),
+		}
+
+		if !client.LastActive.IsZero() {
+			sessionResp.LastActive = client.LastActive.Format(time.RFC3339)
+		}
+
+		// Obter informações adicionais se conectado
+		if client.Connected && client.WAClient != nil && client.WAClient.Store.ID != nil {
+			ownJID := client.WAClient.Store.ID
+			if !ownJID.IsEmpty() {
+				phoneNumber := ownJID.User
+				sessionResp.PhoneNumber = phoneNumber
+			}
+			myJID := client.WAClient.Store.ID.ToNonAD()
+			pictureInfo, err := client.WAClient.GetProfilePictureInfo(myJID, nil)
+			if err == nil && pictureInfo != nil && pictureInfo.URL != "" {
+				sessionResp.Picture = pictureInfo.URL
+			}
+		}
+
+		sessions = append(sessions, sessionResp)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"sessions": sessions,
+		"count":    len(sessions),
+	})
+}
+
+// BulkSessionStatusRequest representa a estrutura para requisição de status em lote
+type BulkSessionStatusRequest struct {
+	UserIDs []string `json:"user_ids" binding:"required"`
+}
+
+// BulkSessionStatusResponse representa a resposta de status em lote
+type BulkSessionStatusResponse struct {
+	Sessions []SessionResponse `json:"sessions"`
+	Count    int               `json:"count"`
+	NotFound []string          `json:"not_found,omitempty"`
+}
+
+// GetBulkSessionStatus retorna o status de múltiplas sessões especificadas
+func (h *SessionHandler) GetBulkSessionStatus(c *gin.Context) {
+	var req BulkSessionStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format", "details": err.Error()})
+		return
+	}
+
+	// Validar se há userIDs para processar
+	if len(req.UserIDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "At least one user_id must be provided"})
+		return
+	}
+
+	// Limitar o número de sessões que podem ser consultadas de uma vez
+	const maxBulkSize = 50
+	if len(req.UserIDs) > maxBulkSize {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": fmt.Sprintf("Too many user_ids. Maximum allowed: %d", maxBulkSize),
+		})
+		return
+	}
+
+	var sessions []SessionResponse
+	var notFound []string
+
+	// Processar cada userID
+	for _, userID := range req.UserIDs {
+		client, exists := h.sessionManager.GetSession(userID)
+		if !exists {
+			notFound = append(notFound, userID)
+			continue
+		}
+
+		// Determinar status
+		status := "disconnected"
+		if client.Connected {
+			status = "connected"
+		}
+
+		sessionResp := SessionResponse{
+			ID:        userID,
+			Status:    status,
+			Connected: client.Connected,
+			CreatedAt: client.CreatedAt.Format(time.RFC3339),
+		}
+
+		if !client.LastActive.IsZero() {
+			sessionResp.LastActive = client.LastActive.Format(time.RFC3339)
+		}
+
+		// Obter informações adicionais se conectado
+		if client.Connected && client.WAClient != nil && client.WAClient.Store.ID != nil {
+			ownJID := client.WAClient.Store.ID
+			if !ownJID.IsEmpty() {
+				phoneNumber := ownJID.User
+				sessionResp.PhoneNumber = phoneNumber
+			}
+			myJID := client.WAClient.Store.ID.ToNonAD()
+			pictureInfo, err := client.WAClient.GetProfilePictureInfo(myJID, nil)
+			if err == nil && pictureInfo != nil && pictureInfo.URL != "" {
+				sessionResp.Picture = pictureInfo.URL
+			}
+		}
+
+		sessions = append(sessions, sessionResp)
+	}
+
+	response := BulkSessionStatusResponse{
+		Sessions: sessions,
+		Count:    len(sessions),
+	}
+
+	// Incluir não encontrados apenas se houver
+	if len(notFound) > 0 {
+		response.NotFound = notFound
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
 // GetQRCode gera um QR code para autenticação
 func (h *SessionHandler) GetQRCode(c *gin.Context) {
 	userID, exists := c.Get("userID")
