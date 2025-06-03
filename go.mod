@@ -12,6 +12,8 @@ require (
 
 require github.com/rabbitmq/amqp091-go v1.10.0
 
+require github.com/joho/godotenv v1.5.1 // indirect
+
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/bytedance/sonic v1.11.6 // indirect

@@ -180,7 +180,7 @@ func main() {
 	webhookHandler := handlers.NewWebhookHandler(webhookService)
 
 	// Configure authentication middleware
-	authMiddleware := middlewares.NewAuthMiddleware(cfg.APIKey)
+	authMiddleware := middlewares.NewAuthMiddleware(cfg.APIKey, cfg.AdminAPIKey)
 
 	// Configure HTTP server
 	r := gin.Default()

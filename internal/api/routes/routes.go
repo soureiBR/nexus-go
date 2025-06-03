@@ -41,12 +41,18 @@ func SetupRoutes(
 	{
 		session.POST("/create", sessionHandler.CreateSession)
 		session.GET("/", sessionHandler.GetSession)
-		session.GET("/admin/all", sessionHandler.GetAllSessionsAdmin)
 		session.POST("/bulk-status", sessionHandler.GetBulkSessionStatus)
 		session.GET("/qr", sessionHandler.GetQRCode)
 		session.POST("/connect", sessionHandler.ConnectSession)
 		session.POST("/disconnect", sessionHandler.DisconnectSession)
 		session.DELETE("/", sessionHandler.DeleteSession)
+	}
+
+	// Rotas admin (requerem chave especial)
+	sessionAdmin := v1.Group("/session/admin")
+	sessionAdmin.Use(authMiddleware.ValidateAdminKey())
+	{
+		sessionAdmin.GET("/all", sessionHandler.GetAllSessionsAdmin)
 	}
 
 	// Rotas de mensagem

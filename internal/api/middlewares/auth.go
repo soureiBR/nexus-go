@@ -11,12 +11,14 @@ import (
 )
 
 type AuthMiddleware struct {
-	apiKey string
+	apiKey   string
+	adminKey string
 }
 
-func NewAuthMiddleware(apiKey string) *AuthMiddleware {
+func NewAuthMiddleware(apiKey, adminKey string) *AuthMiddleware {
 	return &AuthMiddleware{
-		apiKey: apiKey,
+		apiKey:   apiKey,
+		adminKey: adminKey,
 	}
 }
 
@@ -56,6 +58,47 @@ func (am *AuthMiddleware) Authenticate() gin.HandlerFunc {
 		}
 
 		// Token válido, continuar
+		c.Next()
+	}
+}
+
+// ValidateAdminKey verifica se a requisição contém uma chave admin válida
+func (am *AuthMiddleware) ValidateAdminKey() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Verificar se a chave admin está configurada
+		if am.adminKey == "" {
+			logger.Error("Admin API key não configurada")
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"error": "Admin functionality not available",
+				"code":  "ADMIN_KEY_NOT_CONFIGURED",
+			})
+			c.Abort()
+			return
+		}
+
+		// Obter a chave do header x-key
+		providedKey := c.GetHeader("x-key")
+		if providedKey == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error": "Admin key required",
+				"code":  "MISSING_ADMIN_KEY",
+			})
+			c.Abort()
+			return
+		}
+
+		// Validar a chave
+		if providedKey != am.adminKey {
+			logger.Warn("Invalid admin key provided", "provided_key", providedKey)
+			c.JSON(http.StatusForbidden, gin.H{
+				"error": "Invalid admin key",
+				"code":  "INVALID_ADMIN_KEY",
+			})
+			c.Abort()
+			return
+		}
+
+		logger.Debug("Admin key validated successfully")
 		c.Next()
 	}
 }
