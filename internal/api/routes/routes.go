@@ -41,7 +41,6 @@ func SetupRoutes(
 	{
 		session.POST("/create", sessionHandler.CreateSession)
 		session.GET("/", sessionHandler.GetSession)
-		session.GET("/all", sessionHandler.GetAllSessions)
 		session.GET("/admin/all", sessionHandler.GetAllSessionsAdmin)
 		session.POST("/bulk-status", sessionHandler.GetBulkSessionStatus)
 		session.GET("/qr", sessionHandler.GetQRCode)
