@@ -246,6 +246,10 @@ func (qs *QueueSetup) SetupWhatsAppQueues() error {
 		},
 		{
 			name:       "whatsapp.events.group.updated",
+			routingKey: "whatsapp.events.group.member.add.mode.changed",
+		},
+		{
+			name:       "whatsapp.events.group.updated",
 			routingKey: "whatsapp.events.group.deleted",
 		},
 		{

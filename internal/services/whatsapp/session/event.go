@@ -244,6 +244,8 @@ func (sm *SessionManager) handleGroupInfoEvent(userID string, group *events.Grou
 		"timestamp": group.Timestamp.Unix(),
 	}
 
+
+
 	// Add sender information if available
 	if group.Sender != nil {
 		data["sender"] = group.Sender.String()
@@ -258,6 +260,7 @@ func (sm *SessionManager) handleGroupInfoEvent(userID string, group *events.Grou
 			data["member_count"] = len(groupInfo.Participants)
 			data["group_name"] = groupInfo.Name
 			data["group_topic"] = groupInfo.Topic
+			data["member_add_mode"] = groupInfo.MemberAddMode
 		} else {
 			logger.Warn("Failed to get group info for event",
 				"group_jid", group.JID.String(),
