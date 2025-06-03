@@ -42,6 +42,7 @@ func SetupRoutes(
 		session.POST("/create", sessionHandler.CreateSession)
 		session.GET("/", sessionHandler.GetSession)
 		session.GET("/qr", sessionHandler.GetQRCode)
+		session.POST("/connect", sessionHandler.ConnectSession)
 		session.POST("/disconnect", sessionHandler.DisconnectSession)
 		session.DELETE("/", sessionHandler.DeleteSession)
 	}
