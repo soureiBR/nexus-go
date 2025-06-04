@@ -11,7 +11,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/types"
@@ -32,7 +31,6 @@ func NewGroupService(groupManager session.GroupManager) *GroupService {
 	}
 }
 
-// CreateGroup cria um novo grupo
 func (gs *GroupService) CreateGroup(userID, name string, participants []string) (interface{}, error) {
 	logger.Info("Iniciando criação de grupo", "user_id", userID, "group_name", name, "participants", participants)
 	
@@ -48,36 +46,45 @@ func (gs *GroupService) CreateGroup(userID, name string, participants []string) 
 	}
 
 	logger.Debug("Sessão encontrada e conectada", "user_id", userID)
-
-	// Atualizar atividade
 	client.UpdateActivity()
 
-	// Convert participant phone numbers to JIDs with validation
+	// Validar e processar participantes
 	var jids []types.JID
+	var participantErrors = make(map[string]string)
+	var successfulAdds []string
+	var failedAdds []string
+
 	for _, p := range participants {
 		logger.Debug("Processando participante", "user_id", userID, "participant", p)
 		
-		// Validate and process each participant phone number
 		validatedJID, err := gs.validateAndProcessParticipantNumber(userID, p)
 		if err != nil {
 			logger.Error("Falha ao validar participante", "user_id", userID, "participant", p, "error", err)
-			return nil, fmt.Errorf("falha ao validar participante %s: %w", p, err)
+			participantErrors[p] = err.Error()
+			failedAdds = append(failedAdds, p)
+			continue
 		}
 		
-		logger.Debug("Participante validado", "user_id", userID, "participant", p, "validated_jid", validatedJID)
-
-		// Parse the validated JID string
 		jid, err := types.ParseJID(validatedJID)
 		if err != nil {
-			logger.Error("JID inválido para participante", "user_id", userID, "participant", p, "validated_jid", validatedJID, "error", err)
-			return nil, fmt.Errorf("JID inválido para participante %s: %w", p, err)
+			logger.Error("JID inválido para participante", "user_id", userID, "participant", p, "error", err)
+			participantErrors[p] = fmt.Sprintf("JID inválido: %v", err)
+			failedAdds = append(failedAdds, p)
+			continue
 		}
+		
 		jids = append(jids, jid)
+		successfulAdds = append(successfulAdds, p)
+		logger.Debug("Participante validado", "user_id", userID, "participant", p, "validated_jid", validatedJID)
 	}
 
-	logger.Debug("Iniciando criação do grupo", "user_id", userID, "group_name", name, "participants_count", len(jids))
-	logger.Debug("JIDs dos participantes", "jids", jids)
-	// Create group
+	if len(jids) == 0 {
+		return nil, fmt.Errorf("nenhum participante válido fornecido")
+	}
+
+	logger.Debug("Iniciando criação do grupo", "user_id", userID, "group_name", name, "valid_participants", len(jids))
+
+	// Criar grupo
 	req := whatsmeow.ReqCreateGroup{
 		Name:         name,
 		Participants: jids,
@@ -85,35 +92,56 @@ func (gs *GroupService) CreateGroup(userID, name string, participants []string) 
 	
 	logger.Info("Tentando criar grupo no WhatsApp", "user_id", userID, "group_name", name, "participants_count", len(jids))
 	
-	group, err := client.GetWAClient().CreateGroup(req)
+	groupResult, err := client.GetWAClient().CreateGroup(req)
 	if err != nil {
 		logger.Error("Falha ao criar grupo no WhatsApp", "user_id", userID, "group_name", name, "error", err)
 		return nil, fmt.Errorf("falha ao criar grupo: %w", err)
 	}
 
-	// Log success
-	logger.Info("Grupo criado com sucesso no WhatsApp", "user_id", userID, "group_name", name, "group_jid", group.JID.String())
+	logger.Info("Grupo criado com sucesso no WhatsApp", "user_id", userID, "group_name", name, "group_jid", groupResult.JID.String())
 
-	// Construir e retornar informações do grupo
-	groupParticipants := make([]GroupParticipant, len(group.Participants))
-	for i, p := range group.Participants {
-		groupParticipants[i] = GroupParticipant{
-			JID:          p.JID.String(),
-			IsAdmin:      p.IsAdmin,
-			IsSuperAdmin: p.IsSuperAdmin,
+	// Obter informações completas do grupo
+	fullGroupInfo, err := client.GetWAClient().GetGroupInfo(groupResult.JID)
+	if err != nil {
+		logger.Warn("Falha ao obter informações completas do grupo, usando dados básicos", "error", err)
+		// Criar uma estrutura básica com os dados disponíveis do resultado
+		fullGroupInfo = &types.GroupInfo{
+			JID: groupResult.JID,
+			GroupName: types.GroupName{
+				Name: name,
+			},
 		}
 	}
 
-	return &GroupInfo{
-		JID:          group.JID.String(),
-		Name:         name,
-		Created:      time.Now(),
-		Creator:      userID,
-		Participants: groupParticipants,
-	}, nil
+	// Obter JID do usuário atual para contexto
+	currentUserJID := userID
+	if !strings.Contains(userID, "@") {
+		// Se userID não é um JID completo, tentar construir
+		if client.GetWAClient().Store != nil && client.GetWAClient().Store.ID != nil {
+			currentUserJID = client.GetWAClient().Store.ID.String()
+		}
+	}
+
+	// Converter para nossa estrutura expandida
+	groupInfo := ToGroupInfo(fullGroupInfo, currentUserJID)
+
+	// Se não houve erros, retornar apenas o GroupInfo para compatibilidade
+	if len(participantErrors) == 0 {
+		return groupInfo, nil
+	}
+
+	// Se houve erros, retornar resposta completa
+	response := &GroupCreateResponse{
+		GroupInfo:         groupInfo,
+		ParticipantErrors: participantErrors,
+		SuccessfulAdds:    successfulAdds,
+		FailedAdds:        failedAdds,
+	}
+
+	return response, nil
 }
 
-// GetGroupInfo obtém informações de um grupo
+// GetGroupInfo - versão corrigida
 func (gs *GroupService) GetGroupInfo(userID, groupJID string) (interface{}, error) {
 	client, exists := gs.groupManager.GetSession(userID)
 	if !exists {
@@ -124,7 +152,6 @@ func (gs *GroupService) GetGroupInfo(userID, groupJID string) (interface{}, erro
 		return nil, fmt.Errorf("sessão não conectada: %s", userID)
 	}
 
-	// Atualizar atividade
 	client.UpdateActivity()
 
 	// Converter para JID
@@ -144,26 +171,67 @@ func (gs *GroupService) GetGroupInfo(userID, groupJID string) (interface{}, erro
 		return nil, fmt.Errorf("falha ao obter informações do grupo: %w", err)
 	}
 
-	// Converter participantes
-	participants := make([]GroupParticipant, len(groupInfo.Participants))
-	for i, p := range groupInfo.Participants {
-		participants[i] = GroupParticipant{
-			JID:          p.JID.String(),
-			IsAdmin:      p.IsAdmin,
-			IsSuperAdmin: p.IsSuperAdmin,
+	// Obter JID do usuário atual
+	currentUserJID := userID
+	if !strings.Contains(userID, "@") {
+		if client.GetWAClient().Store != nil && client.GetWAClient().Store.ID != nil {
+			currentUserJID = client.GetWAClient().Store.ID.String()
 		}
 	}
 
-	return &GroupInfo{
-		JID:          jid.String(),
-		Name:         groupInfo.Name,
-		Topic:        groupInfo.Topic,
-		Creator:      groupInfo.OwnerJID.String(),
-		Participants: participants,
-	}, nil
+	// Converter para nossa estrutura expandida
+	expandedGroupInfo := ToGroupInfo(groupInfo, currentUserJID)
+
+	// Tentar obter link de convite (pode falhar se não for admin)
+	if expandedGroupInfo.UserPermissions.CanEditInfo {
+		inviteLink, err := client.GetWAClient().GetGroupInviteLink(jid, false)
+		if err == nil && inviteLink != "" {
+			// Extrair código do link
+			if strings.HasPrefix(inviteLink, "https://chat.whatsapp.com/") {
+				code := strings.TrimPrefix(inviteLink, "https://chat.whatsapp.com/")
+				expandedGroupInfo.InviteInfo = &GroupInviteInfo{
+					Code: code,
+				}
+			}
+		}
+	}
+
+	logger.Debug("Informações do grupo obtidas",
+		"user_id", userID,
+		"group_jid", groupJID,
+		"group_name", expandedGroupInfo.Name,
+		"participants_count", expandedGroupInfo.ParticipantCount,
+		"is_participant", expandedGroupInfo.UserPermissions.IsParticipant,
+		"can_send_messages", expandedGroupInfo.UserPermissions.CanSendMessages,
+		"can_edit_info", expandedGroupInfo.UserPermissions.CanEditInfo,
+		"can_add_members", expandedGroupInfo.UserPermissions.CanAddMembers)
+
+	return expandedGroupInfo, nil
 }
 
-// GetJoinedGroups obtém lista de grupos em que o usuário é membro
+
+// Método auxiliar para debug das informações do grupo (versão corrigida)
+func (gs *GroupService) debugGroupInfo(groupInfo *types.GroupInfo, context string) {
+	logger.Debug("Group info debug", 
+		"context", context,
+		"jid", groupInfo.JID.String(),
+		"name", groupInfo.Name,
+		"topic", groupInfo.Topic,
+		"owner_jid", func() string {
+			if !groupInfo.OwnerJID.IsEmpty() {
+				return groupInfo.OwnerJID.String()
+			}
+			return "empty"
+		}(),
+		"group_created", groupInfo.GroupCreated.String(),
+		"participants_count", len(groupInfo.Participants),
+		"is_announce", groupInfo.IsAnnounce,
+		"is_locked", groupInfo.IsLocked,
+		"is_ephemeral", groupInfo.IsEphemeral,
+		"member_add_mode", string(groupInfo.MemberAddMode))
+}
+
+// GetJoinedGroups obtém lista completa de grupos em que o usuário é membro
 func (gs *GroupService) GetJoinedGroups(userID string) (interface{}, error) {
 	client, exists := gs.groupManager.GetSession(userID)
 	if !exists {
@@ -174,7 +242,6 @@ func (gs *GroupService) GetJoinedGroups(userID string) (interface{}, error) {
 		return nil, fmt.Errorf("sessão não conectada: %s", userID)
 	}
 
-	// Atualizar atividade
 	client.UpdateActivity()
 
 	// Obter lista de grupos
@@ -183,29 +250,20 @@ func (gs *GroupService) GetJoinedGroups(userID string) (interface{}, error) {
 		return nil, fmt.Errorf("falha ao obter lista de grupos: %w", err)
 	}
 
-	// Converter para formato de resposta
-	result := make([]GroupInfo, len(groups))
-	for i, group := range groups {
-		// Converter participantes
-		participants := make([]GroupParticipant, len(group.Participants))
-		for j, p := range group.Participants {
-			participants[j] = GroupParticipant{
-				JID:          p.JID.String(),
-				IsAdmin:      p.IsAdmin,
-				IsSuperAdmin: p.IsSuperAdmin,
-			}
-		}
-
-		result[i] = GroupInfo{
-			JID:          group.JID.String(),
-			Name:         group.Name,
-			Topic:        group.Topic,
-			Creator:      group.OwnerJID.String(),
-			Participants: participants,
+	// Obter JID do usuário atual
+	currentUserJID := userID
+	if !strings.Contains(userID, "@") {
+		if client.GetWAClient().Store != nil && client.GetWAClient().Store.ID != nil {
+			currentUserJID = client.GetWAClient().Store.ID.String()
 		}
 	}
 
-	// Log
+	// Converter para formato expandido
+	result := make([]*GroupInfo, len(groups))
+	for i, group := range groups {
+		result[i] = ToGroupInfo(group, currentUserJID)
+	}
+
 	logger.Debug("Lista de grupos obtida",
 		"user_id", userID,
 		"groups_count", len(groups))
