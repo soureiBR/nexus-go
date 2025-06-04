@@ -206,15 +206,16 @@ func (h *CommunityHandler) GetCommunityInfo(c *gin.Context) {
 
 	userIDStr := userID.(string)
 
-	var req CommunityInfoRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
+	// Get community_jid from query parameters
+	communityJID := c.Query("community_jid")
+	if communityJID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "community_jid query parameter is required"})
 		return
 	}
 
 	// Create payload
 	payload := worker.CommunityInfoPayload{
-		CommunityJID: req.CommunityJID,
+		CommunityJID: communityJID,
 	}
 
 	// Submit task to worker
@@ -223,7 +224,7 @@ func (h *CommunityHandler) GetCommunityInfo(c *gin.Context) {
 		logger.Error("Falha ao obter informações da comunidade",
 			"error", err,
 			"user_id", userIDStr,
-			"community_jid", req.CommunityJID)
+			"community_jid", communityJID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao obter informações da comunidade", "details": err.Error()})
 		return
 	}
@@ -543,15 +544,16 @@ func (h *CommunityHandler) GetCommunityInviteLink(c *gin.Context) {
 
 	userIDStr := userID.(string)
 
-	var req GetCommunityInviteLinkRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
+	// Get community_jid from query parameters
+	communityJID := c.Query("community_jid")
+	if communityJID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "community_jid query parameter is required"})
 		return
 	}
 
 	// Create payload
 	payload := worker.GetCommunityInviteLinkPayload{
-		CommunityJID: req.CommunityJID,
+		CommunityJID: communityJID,
 	}
 
 	// Submit task to worker
@@ -560,7 +562,7 @@ func (h *CommunityHandler) GetCommunityInviteLink(c *gin.Context) {
 		logger.Error("Falha ao obter link de convite da comunidade",
 			"error", err,
 			"user_id", userIDStr,
-			"community_jid", req.CommunityJID)
+			"community_jid", communityJID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao obter link de convite da comunidade", "details": err.Error()})
 		return
 	}
@@ -672,9 +674,10 @@ func (h *CommunityHandler) GetCommunityLinkedGroups(c *gin.Context) {
 
 	userIDStr := userID.(string)
 
-	var req GetCommunityLinkedGroupsRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
+	// Get community_jid from query parameters
+	communityJID := c.Query("community_jid")
+	if communityJID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "community_jid query parameter is required"})
 		return
 	}
 
@@ -692,7 +695,7 @@ func (h *CommunityHandler) GetCommunityLinkedGroups(c *gin.Context) {
 
 	// Create payload
 	payload := worker.GetCommunityLinkedGroupsPayload{
-		CommunityJID: req.CommunityJID,
+		CommunityJID: communityJID,
 	}
 
 	// Submit task to worker
@@ -701,7 +704,7 @@ func (h *CommunityHandler) GetCommunityLinkedGroups(c *gin.Context) {
 		logger.Error("Falha ao obter grupos vinculados da comunidade",
 			"error", err,
 			"user_id", userIDStr,
-			"community_jid", req.CommunityJID)
+			"community_jid", communityJID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao obter grupos vinculados da comunidade", "details": err.Error()})
 		return
 	}

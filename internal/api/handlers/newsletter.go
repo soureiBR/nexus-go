@@ -175,9 +175,10 @@ func (h *NewsletterHandler) GetChannelInfo(c *gin.Context) {
 
 	userIDStr := userID.(string)
 
-	var req ChannelJIDRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
+	// Get jid from query parameters
+	jid := c.Query("jid")
+	if jid == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "jid query parameter is required"})
 		return
 	}
 
@@ -196,13 +197,13 @@ func (h *NewsletterHandler) GetChannelInfo(c *gin.Context) {
 
 	// Create payload
 	payload := worker.ChannelJIDPayload{
-		JID: req.JID,
+		JID: jid,
 	}
 
 	// Submit task to worker
 	result, err := h.submitWorkerTask(userIDStr, worker.CmdGetChannelInfo, payload)
 	if err != nil {
-		logger.Error("Falha ao obter informações do canal", "error", err, "user_id", userIDStr, "jid", req.JID)
+		logger.Error("Falha ao obter informações do canal", "error", err, "user_id", userIDStr, "jid", jid)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao obter informações do canal", "details": err.Error()})
 		return
 	}

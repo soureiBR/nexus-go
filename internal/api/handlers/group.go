@@ -244,15 +244,16 @@ func (h *GroupHandler) GetGroupInfo(c *gin.Context) {
 
 	userIDStr := userID.(string)
 
-	var req GroupInfoRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
+	// Get group_jid from query parameters
+	groupJID := c.Query("group_jid")
+	if groupJID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "group_jid query parameter is required"})
 		return
 	}
 
 	// Create payload
 	payload := worker.GroupInfoPayload{
-		GroupJID: req.GroupJID,
+		GroupJID: groupJID,
 	}
 
 	// Submit task to worker
@@ -261,7 +262,7 @@ func (h *GroupHandler) GetGroupInfo(c *gin.Context) {
 		logger.Error("Falha ao obter informações do grupo",
 			"error", err,
 			"user_id", userIDStr,
-			"group_jid", req.GroupJID)
+			"group_jid", groupJID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao obter informações do grupo", "details": err.Error()})
 		return
 	}
@@ -727,15 +728,16 @@ func (h *GroupHandler) GetGroupInviteLink(c *gin.Context) {
 
 	userIDStr := userID.(string)
 
-	var req GetInviteLinkRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
+	// Get group_jid from query parameters
+	groupJID := c.Query("group_jid")
+	if groupJID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "group_jid query parameter is required"})
 		return
 	}
 
 	// Create payload
 	payload := worker.GroupInviteLinkPayload{
-		GroupJID: req.GroupJID,
+		GroupJID: groupJID,
 	}
 
 	// Submit task to worker
@@ -744,7 +746,7 @@ func (h *GroupHandler) GetGroupInviteLink(c *gin.Context) {
 		logger.Error("Falha ao obter link de convite",
 			"error", err,
 			"user_id", userIDStr,
-			"group_jid", req.GroupJID)
+			"group_jid", groupJID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao obter link de convite", "details": err.Error()})
 		return
 	}
