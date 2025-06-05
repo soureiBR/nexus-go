@@ -63,6 +63,11 @@ func (sm *SessionManager) ProcessEvent(userID string, evt interface{}) {
 			sm.clientsMutex.Lock()
 			client.Connected = true
 			sm.clientsMutex.Unlock()
+
+			// Clear pending QR request since authentication is complete
+			sm.qrMutex.Lock()
+			delete(sm.pendingQRRequests, userID)
+			sm.qrMutex.Unlock()
 		}
 		// If client.WAClient.Store.ID is nil, this is just a connection to WhatsApp servers
 		// without authentication - don't set Connected = true

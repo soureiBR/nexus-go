@@ -491,10 +491,16 @@ func (h *SessionHandler) GetQRCode(c *gin.Context) {
 				})
 				c.Writer.Flush()
 			} else if evt.Event == "success" {
-				// Login realizado com sucesso
-				c.SSEvent("success", gin.H{"message": "Login realizado com sucesso"})
+				// QR foi escaneado com sucesso, mas precisamos aguardar a conexão completa
+				c.SSEvent("scanned", gin.H{
+					"message": "QR code escaneado! Aguardando autenticação...",
+					"status":  "qr_scanned",
+				})
 				c.Writer.Flush()
-				return
+				
+				// After QR scan, the whatsmeow library will close the QR channel
+				// We need to exit this select and monitor the session state directly
+				goto monitorAuthentication
 			} else {
 				// Outros eventos (timeout, etc)
 				c.SSEvent("status", gin.H{"event": evt.Event})
@@ -527,6 +533,54 @@ func (h *SessionHandler) GetQRCode(c *gin.Context) {
 			// Clean up session after timeout
 			if err := h.sessionManager.ResetSession(context.Background(), userIDStr); err != nil {
 				logger.Error("Falha ao limpar sessão após timeout", "error", err, "user_id", userIDStr)
+			}
+			return
+		}
+	}
+
+monitorAuthentication:
+	// After QR scan, monitor authentication state directly
+	// The QR channel is closed by whatsmeow after scan, so we check session state
+	logger.Info("QR escaneado, monitorando estado de autenticação", "user_id", userIDStr)
+	
+	authCheckTicker := time.NewTicker(1 * time.Second)
+	defer authCheckTicker.Stop()
+	
+	// Create a timeout context for authentication monitoring (2 minutes should be enough)
+	authCtx, authCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer authCancel()
+	
+	for {
+		select {
+		case <-authCheckTicker.C:
+			// Check if authentication completed
+			updatedClient, exists := h.sessionManager.GetSession(userIDStr)
+			if exists && updatedClient.Connected && updatedClient.WAClient.Store.ID != nil {
+				logger.Info("Autenticação completada com sucesso", "user_id", userIDStr)
+				c.SSEvent("success", gin.H{
+					"message": "Autenticação completada com sucesso!",
+					"status":  "authenticated",
+				})
+				c.Writer.Flush()
+				return
+			}
+			
+		case <-clientGone:
+			logger.Info("Cliente SSE desconectado durante monitoramento de autenticação", "user_id", userIDStr)
+			if err := h.sessionManager.ResetSession(context.Background(), userIDStr); err != nil {
+				logger.Error("Falha ao limpar sessão após desconexão SSE", "error", err, "user_id", userIDStr)
+			}
+			return
+			
+		case <-authCtx.Done():
+			logger.Warn("Timeout durante monitoramento de autenticação", "user_id", userIDStr)
+			c.SSEvent("error", gin.H{
+				"message": "Timeout durante autenticação. Por favor, tente novamente.",
+				"status":  "auth_timeout",
+			})
+			c.Writer.Flush()
+			if err := h.sessionManager.ResetSession(context.Background(), userIDStr); err != nil {
+				logger.Error("Falha ao limpar sessão após timeout de autenticação", "error", err, "user_id", userIDStr)
 			}
 			return
 		}

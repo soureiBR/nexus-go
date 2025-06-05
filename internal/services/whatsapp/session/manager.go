@@ -338,12 +338,11 @@ func (sm *SessionManager) GetQRChannel(ctx context.Context, userID string) (<-ch
 
 	// Iniciar conexão em goroutine
 	go func() {
-		defer cleanup() // Always cleanup when goroutine exits
-		
 		logger.Info("Iniciando conexão para QR code", "user_id", userID)
 
 		// Tentar conectar com retry em caso de falhas
 		maxRetries := 3
+		var connectionError error
 		for i := 0; i < maxRetries; i++ {
 			err := client.WAClient.Connect()
 			if err == nil {
@@ -351,9 +350,13 @@ func (sm *SessionManager) GetQRChannel(ctx context.Context, userID string) (<-ch
 				// This will be set by the ProcessEvent when authentication succeeds
 				client.LastActive = time.Now()
 				logger.Info("Cliente conectado aos servidores WhatsApp", "user_id", userID)
-				break
+				
+				// Connection successful - wait for authentication to complete or timeout
+				// The cleanup will be handled when the SSE connection times out or succeeds
+				return
 			}
 
+			connectionError = err
 			logger.Error("Falha ao conectar cliente",
 				"error", err,
 				"user_id", userID,
@@ -363,6 +366,10 @@ func (sm *SessionManager) GetQRChannel(ctx context.Context, userID string) (<-ch
 			// Aguardar antes de tentar novamente
 			time.Sleep(2 * time.Second)
 		}
+
+		// If we reach here, all connection attempts failed
+		logger.Error("Falha ao conectar após todas as tentativas", "user_id", userID, "error", connectionError)
+		cleanup() // Only cleanup on connection failure
 	}()
 
 	return qrChan, nil
