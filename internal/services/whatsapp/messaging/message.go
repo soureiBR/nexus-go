@@ -2,8 +2,12 @@
 package messaging
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
+	"image"
+	"image/jpeg"
 	"io"
 	"net/http"
 	"strings"
@@ -11,9 +15,11 @@ import (
 
 	"yourproject/internal/services/whatsapp/session"
 	"yourproject/internal/services/whatsapp/worker"
+	"yourproject/internal/services/whatsapp/extensions"
 	"yourproject/pkg/logger"
 
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/binary"
 	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
@@ -344,6 +350,11 @@ func (ms *MessageService) SendMedia(userID, to, mediaURL, mediaType, caption str
 		return "", fmt.Errorf("JID inválido: %w", err)
 	}
 
+	// Check if recipient is a newsletter - handle differently
+	if strings.Contains(validatedJID, "@newsletter") {
+		return ms.sendMediaToNewsletter(userID, validatedJID, mediaURL, mediaType, caption)
+	}
+
 	// Criar contexto com timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -447,15 +458,19 @@ func (ms *MessageService) SendMedia(userID, to, mediaURL, mediaType, caption str
 		})
 
 	case "audio", "voice":
+		// Calculate audio duration in seconds (placeholder - should be extracted from actual audio file)
+		audioDurationInSeconds := uint32(30) // TODO: Extract actual duration from audio file
+		
 		audioMsg := &waE2E.AudioMessage{
-			Mimetype:      proto.String(resp.Header.Get("Content-Type")),
+			Mimetype:      proto.String("audio/ogg; codecs=opus"),
 			URL:           &uploadResp.URL,
 			DirectPath:    &uploadResp.DirectPath,
 			MediaKey:      uploadResp.MediaKey,
 			FileEncSHA256: uploadResp.FileEncSHA256,
 			FileSHA256:    uploadResp.FileSHA256,
 			FileLength:    &uploadResp.FileLength,
-			PTT:           proto.Bool(mediaType == "voice"),
+			PTT:           proto.Bool(true),
+			Seconds:       proto.Uint32(audioDurationInSeconds),
 		}
 
 		msg, err = client.WAClient.SendMessage(ctx, recipient, &waE2E.Message{
@@ -489,6 +504,205 @@ func (ms *MessageService) SendMedia(userID, to, mediaURL, mediaType, caption str
 
 	// Log
 	logger.Debug("Mensagem de mídia da URL enviada", "user_id", userID, "to", to, "type", mediaType, "url", mediaURL, "message_id", msg.ID)
+
+	return msg.ID, nil
+}
+
+// sendMediaToNewsletter handles media upload specifically for newsletters using proper WhatsApp newsletter upload method
+func (ms *MessageService) sendMediaToNewsletter(userID, newsletterJID, mediaURL, mediaType, caption string) (string, error) {
+	logger.Debug("Enviando mídia para newsletter",
+		"user_id", userID,
+		"newsletter_jid", newsletterJID,
+		"media_url", mediaURL,
+		"media_type", mediaType)
+
+	// Get client session
+	client, exists := ms.sessionManager.GetSession(userID)
+	if !exists {
+		return "", fmt.Errorf("sessão não encontrada: %s", userID)
+	}
+
+	// Parse newsletter JID
+	parsedJID, err := types.ParseJID(newsletterJID)
+	if err != nil {
+		return "", fmt.Errorf("JID da newsletter inválido: %w", err)
+	}
+
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// Determine WhatsApp media type for newsletter upload
+	var uploadType whatsmeow.MediaType
+	switch mediaType {
+	case "image", "img":
+		uploadType = whatsmeow.MediaImage
+	case "video", "vid":
+		uploadType = whatsmeow.MediaVideo
+	case "audio", "voice":
+		uploadType = whatsmeow.MediaAudio
+	default:
+		return "", fmt.Errorf("newsletters suportam apenas imagens, vídeos e áudios, tipo '%s' não suportado", mediaType)
+	}
+
+	// Download the media from URL
+	logger.Debug("Baixando mídia da URL para newsletter", "url", mediaURL, "type", mediaType)
+	httpClient := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+	resp, err := httpClient.Get(mediaURL)
+	if err != nil {
+		return "", fmt.Errorf("falha ao baixar mídia da URL: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("falha ao baixar mídia: HTTP %d - %s", resp.StatusCode, resp.Status)
+	}
+
+	// Validate content type
+	contentType := resp.Header.Get("Content-Type")
+	switch mediaType {
+	case "image", "img":
+		if contentType != "" && !strings.HasPrefix(contentType, "image/") {
+			logger.Warn("Tipo de conteúdo suspeito para imagem de newsletter",
+				"content_type", contentType,
+				"image_url", mediaURL)
+		}
+	case "video", "vid":
+		if contentType != "" && !strings.HasPrefix(contentType, "video/") {
+			logger.Warn("Tipo de conteúdo suspeito para vídeo de newsletter",
+				"content_type", contentType,
+				"video_url", mediaURL)
+		}
+	case "audio", "voice":
+		if contentType != "" && !strings.HasPrefix(contentType, "audio/") {
+			logger.Warn("Tipo de conteúdo suspeito para áudio de newsletter",
+				"content_type", contentType,
+				"audio_url", mediaURL)
+		}
+	}
+
+	// Read the media data
+	mediaData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("falha ao ler dados da mídia: %w", err)
+	}
+
+	// Validate media data
+	if len(mediaData) == 0 {
+		return "", fmt.Errorf("dados da mídia estão vazios")
+	}
+
+	logger.Debug("Mídia baixada para newsletter",
+		"user_id", userID,
+		"newsletter_jid", newsletterJID,
+		"media_url", mediaURL,
+		"media_type", mediaType,
+		"size_bytes", len(mediaData),
+		"content_type", contentType)
+
+	// For images, convert to JPEG if needed (WhatsApp newsletters prefer JPEG)
+	var processedData []byte
+	if mediaType == "image" || mediaType == "img" {
+		processedData, err = ms.convertToJPEG(mediaData, 85)
+		if err != nil {
+			logger.Warn("Falha ao converter para JPEG, usando dados originais", "error", err)
+			processedData = mediaData
+		} else {
+			logger.Debug("Imagem convertida para JPEG para newsletter",
+				"user_id", userID,
+				"newsletter_jid", newsletterJID,
+				"original_size", len(mediaData),
+				"jpeg_size", len(processedData))
+		}
+	} else {
+		// For video and audio, use data as-is
+		processedData = mediaData
+	}
+
+	// Upload media specifically for newsletter (unencrypted)
+	logger.Debug("Fazendo upload da mídia para newsletter usando UploadNewsletter",
+		"newsletter_jid", newsletterJID,
+		"media_type", mediaType,
+		"upload_type", uploadType)
+
+	uploadResp, err := client.WAClient.UploadNewsletter(ctx, processedData, uploadType)
+	if err != nil {
+		return "", fmt.Errorf("falha ao fazer upload da mídia para newsletter: %w", err)
+	}
+
+	logger.Debug("Upload da mídia para newsletter concluído",
+		"newsletter_jid", newsletterJID,
+		"media_type", mediaType,
+		"upload_url", uploadResp.URL,
+		"direct_path", uploadResp.DirectPath,
+		"file_length", uploadResp.FileLength,
+		"has_handle", uploadResp.Handle != "")
+
+	// Create appropriate message based on media type
+	var message *waE2E.Message
+	switch mediaType {
+	case "image", "img":
+		imageMsg := &waE2E.ImageMessage{
+			Caption:    proto.String(caption),
+			Mimetype:   proto.String(contentType),
+			URL:        &uploadResp.URL,
+			DirectPath: &uploadResp.DirectPath,
+			FileSHA256: uploadResp.FileSHA256,
+			FileLength: &uploadResp.FileLength,
+			// Note: No MediaKey or FileEncSHA256 for newsletter media (unencrypted)
+		}
+		message = &waE2E.Message{ImageMessage: imageMsg}
+
+	case "video", "vid":
+		videoMsg := &waE2E.VideoMessage{
+			Caption:    proto.String(caption),
+			Mimetype:   proto.String(contentType),
+			URL:        &uploadResp.URL,
+			DirectPath: &uploadResp.DirectPath,
+			FileSHA256: uploadResp.FileSHA256,
+			FileLength: &uploadResp.FileLength,
+			// Note: No MediaKey or FileEncSHA256 for newsletter media (unencrypted)
+		}
+		message = &waE2E.Message{VideoMessage: videoMsg}
+
+	case "audio", "voice":
+		// Calculate audio duration in seconds (placeholder - should be extracted from actual audio file)
+		audioDurationInSeconds := uint32(30) // TODO: Extract actual duration from audio file
+		
+		audioMsg := &waE2E.AudioMessage{
+			Mimetype:   proto.String("audio/ogg; codecs=opus"),
+			URL:        &uploadResp.URL,
+			DirectPath: &uploadResp.DirectPath,
+			FileSHA256: uploadResp.FileSHA256,
+			FileLength: &uploadResp.FileLength,
+			PTT:        proto.Bool(true),
+			Seconds:    proto.Uint32(audioDurationInSeconds),
+			// Note: No MediaKey or FileEncSHA256 for newsletter media (unencrypted)
+		}
+		message = &waE2E.Message{AudioMessage: audioMsg}
+	}
+
+	// Send the message with the media handle (crucial for newsletter media)
+	sendExtra := whatsmeow.SendRequestExtra{
+		MediaHandle: uploadResp.Handle, // This is the crucial part for newsletter media
+	}
+
+	msg, err := client.WAClient.SendMessage(ctx, parsedJID, message, sendExtra)
+	if err != nil {
+		return "", fmt.Errorf("falha ao enviar mensagem de mídia para newsletter: %w", err)
+	}
+
+	// Update last activity
+	client.LastActive = time.Now()
+
+	logger.Debug("Mídia enviada com sucesso para newsletter",
+		"user_id", userID,
+		"newsletter_jid", newsletterJID,
+		"media_type", mediaType,
+		"message_id", msg.ID,
+		"media_handle", uploadResp.Handle)
 
 	return msg.ID, nil
 }
@@ -1069,4 +1283,210 @@ func isBrazilianAreaCode(number string) bool {
 	}
 
 	return false
+}
+
+// Helper methods for newsletter media upload
+
+// convertToJPEG converts image data to JPEG format with WhatsApp-compatible settings
+func (ms *MessageService) convertToJPEG(imageData []byte, quality int) ([]byte, error) {
+	// First, validate input image data
+	if len(imageData) == 0 {
+		return nil, fmt.Errorf("dados da imagem estão vazios")
+	}
+
+	// Decodifica a imagem (detecta automaticamente o formato)
+	img, format, err := image.Decode(bytes.NewReader(imageData))
+	if err != nil {
+		return nil, fmt.Errorf("falha ao decodificar imagem (formato: %s): %w", format, err)
+	}
+
+	// Get image dimensions
+	bounds := img.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+
+	logger.Debug("Processando imagem",
+		"format", format,
+		"width", width,
+		"height", height,
+		"original_size", len(imageData))
+
+	// WhatsApp has specific requirements for newsletter photos
+	// Maximum dimensions are typically 640x640 pixels
+	maxDimension := 640
+	needsResize := width > maxDimension || height > maxDimension
+
+	if needsResize {
+		// Calculate new dimensions maintaining aspect ratio
+		var newWidth, newHeight int
+		if width > height {
+			newWidth = maxDimension
+			newHeight = (height * maxDimension) / width
+		} else {
+			newHeight = maxDimension
+			newWidth = (width * maxDimension) / height
+		}
+
+		// Create a new image with the resized dimensions
+		resizedImg := image.NewRGBA(image.Rect(0, 0, newWidth, newHeight))
+
+		// Simple nearest-neighbor scaling
+		for y := 0; y < newHeight; y++ {
+			for x := 0; x < newWidth; x++ {
+				srcX := (x * width) / newWidth
+				srcY := (y * height) / newHeight
+				resizedImg.Set(x, y, img.At(srcX, srcY))
+			}
+		}
+
+		img = resizedImg
+		logger.Debug("Imagem redimensionada",
+			"original_width", width,
+			"original_height", height,
+			"new_width", newWidth,
+			"new_height", newHeight)
+	}
+
+	// Always re-encode to ensure WhatsApp compatibility
+	// Even if it's already JPEG, we want to ensure proper encoding
+	var buf bytes.Buffer
+	err = jpeg.Encode(&buf, img, &jpeg.Options{Quality: quality})
+	if err != nil {
+		return nil, fmt.Errorf("falha ao codificar imagem como JPEG: %w", err)
+	}
+
+	processedData := buf.Bytes()
+
+	// Validate JPEG magic bytes immediately after encoding
+	if len(processedData) < 2 || processedData[0] != 0xFF || processedData[1] != 0xD8 {
+		return nil, fmt.Errorf("dados JPEG gerados são inválidos: magic bytes incorretos (%X %X)",
+			processedData[0], processedData[1])
+	}
+
+	// Validate the processed image size (WhatsApp typically has a file size limit)
+	maxFileSize := 1024 * 1024 // 1MB limit
+	if len(processedData) > maxFileSize {
+		// Try with lower quality
+		lowerQuality := quality - 20
+		if lowerQuality < 50 {
+			lowerQuality = 50
+		}
+
+		buf.Reset()
+		err = jpeg.Encode(&buf, img, &jpeg.Options{Quality: lowerQuality})
+		if err != nil {
+			return nil, fmt.Errorf("falha ao recodificar imagem com qualidade menor: %w", err)
+		}
+		processedData = buf.Bytes()
+
+		// Validate magic bytes again after recompression
+		if len(processedData) < 2 || processedData[0] != 0xFF || processedData[1] != 0xD8 {
+			return nil, fmt.Errorf("dados JPEG recomprimidos são inválidos: magic bytes incorretos")
+		}
+
+		logger.Debug("Imagem recomprimida para reduzir tamanho",
+			"original_quality", quality,
+			"new_quality", lowerQuality,
+			"original_size", len(imageData),
+			"new_size", len(processedData))
+	}
+
+	// Final validation
+	logger.Debug("JPEG produzido com sucesso",
+		"size", len(processedData),
+		"magic_bytes", fmt.Sprintf("%X %X", processedData[0], processedData[1]))
+
+	return processedData, nil
+}
+
+// updateNewsletterPictureViaMex sends a newsletter picture update using MEX
+func (ms *MessageService) updateNewsletterPictureViaMex(client *whatsmeow.Client, ctx context.Context, newsletterJID string, imageData []byte) error {
+	internals := client.DangerousInternals()
+
+	// Converter imagem para base64 (como no Baileys)
+	base64Image := base64.StdEncoding.EncodeToString(imageData)
+
+	// Usar mesma estrutura do name/description
+	variables := map[string]interface{}{
+		"newsletter_id": newsletterJID,
+		"updates": map[string]interface{}{
+			"picture":  base64Image, // Imagem em base64
+			"settings": nil,
+		},
+	}
+
+	// Use the confirmed working query ID for newsletter updates
+	queryID := "6620195908089573"
+
+	logger.Debug("MEX query para picture - variables completas",
+		"query_id", queryID,
+		"newsletter_jid", newsletterJID,
+		"image_size_bytes", len(imageData),
+		"base64_length", len(base64Image))
+
+	result, err := internals.SendMexIQ(ctx, queryID, variables)
+	if err != nil {
+		logger.Error("MEX query failed for picture",
+			"error", err,
+			"query_id", queryID,
+			"newsletter_jid", newsletterJID)
+		return fmt.Errorf("MEX query failed for picture: %w", err)
+	}
+
+	logger.Debug("MEX query succeeded for picture",
+		"query_id", queryID,
+		"result", string(result),
+		"newsletter_jid", newsletterJID)
+	return nil
+}
+
+// updateNewsletterPictureViaRawNodes sends a newsletter picture update using raw binary nodes
+func (ms *MessageService) updateNewsletterPictureViaRawNodes(client *whatsmeow.Client, ctx context.Context, newsletterJID string, imageData []byte) error {
+	internals := client.DangerousInternals()
+
+	parsedJID, err := types.ParseJID(newsletterJID)
+	if err != nil {
+		return fmt.Errorf("invalid newsletter JID: %w", err)
+	}
+
+	// Converter imagem para base64
+	base64Image := base64.StdEncoding.EncodeToString(imageData)
+
+	// Build raw binary node
+	node := binary.Node{
+		Tag: "iq",
+		Attrs: binary.Attrs{
+			"id":    internals.GenerateRequestID(),
+			"type":  "set",
+			"to":    parsedJID.String(),
+			"xmlns": "newsletter",
+		},
+		Content: []binary.Node{{
+			Tag: "update",
+			Content: []binary.Node{
+				{
+					Tag:     "picture",
+					Content: base64Image,
+				},
+			},
+		}},
+	}
+
+	// Send raw node
+	err = internals.SendNode(node)
+	if err != nil {
+		return fmt.Errorf("failed to send raw node for picture: %w", err)
+	}
+
+	logger.Debug("Raw node sent successfully for picture",
+		"newsletter_jid", newsletterJID,
+		"image_size_bytes", len(imageData),
+		"base64_length", len(base64Image))
+	return nil
+}
+
+// setNewsletterPhotoViaExtension sets the newsletter photo using custom extension
+func (ms *MessageService) setNewsletterPhotoViaExtension(client *whatsmeow.Client, jid types.JID, imageData []byte) (string, error) {
+	// Use the extension method for setting newsletter photo
+	return extensions.SetNewsletterPhoto(client, jid, imageData)
 }
