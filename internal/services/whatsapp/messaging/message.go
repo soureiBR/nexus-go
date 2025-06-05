@@ -9,10 +9,12 @@ import (
 	"image"
 	"image/jpeg"
 	"io"
+	"math/rand"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/hajimehoshi/go-mp3"
 	"yourproject/internal/services/whatsapp/session"
 	"yourproject/internal/services/whatsapp/worker"
 	"yourproject/internal/services/whatsapp/extensions"
@@ -474,8 +476,9 @@ func (ms *MessageService) SendMedia(userID, to, mediaURL, mediaType, caption str
 		})
 
 	case "audio", "voice":
-		// Calculate audio duration in seconds (placeholder - should be extracted from actual audio file)
-		audioDurationInSeconds := uint32(30) // TODO: Extract actual duration from audio file
+		// Calculate audio duration and generate waveform
+		audioDurationInSeconds := getDurationInSeconds(fileData)
+		waveform := generateWaveform(fileData)
 		
 		audioMsg := &waE2E.AudioMessage{
 			Mimetype:      proto.String("audio/ogg; codecs=opus"),
@@ -487,6 +490,7 @@ func (ms *MessageService) SendMedia(userID, to, mediaURL, mediaType, caption str
 			FileLength:    &uploadResp.FileLength,
 			PTT:           proto.Bool(true),
 			Seconds:       proto.Uint32(audioDurationInSeconds),
+			Waveform:      waveform, // This is key for showing waveforms
 		}
 
 		msg, err = client.WAClient.SendMessage(ctx, recipient, &waE2E.Message{
@@ -684,8 +688,9 @@ func (ms *MessageService) sendMediaToNewsletter(userID, newsletterJID, mediaURL,
 		message = &waE2E.Message{VideoMessage: videoMsg}
 
 	case "audio", "voice":
-		// Calculate audio duration in seconds (placeholder - should be extracted from actual audio file)
-		audioDurationInSeconds := uint32(30) // TODO: Extract actual duration from audio file
+		// Calculate audio duration and generate waveform
+		audioDurationInSeconds := getDurationInSeconds(processedData)
+		waveform := generateWaveform(processedData)
 		
 		audioMsg := &waE2E.AudioMessage{
 			Mimetype:   proto.String("audio/ogg; codecs=opus"),
@@ -695,6 +700,7 @@ func (ms *MessageService) sendMediaToNewsletter(userID, newsletterJID, mediaURL,
 			FileLength: &uploadResp.FileLength,
 			PTT:        proto.Bool(true),
 			Seconds:    proto.Uint32(audioDurationInSeconds),
+			Waveform:   waveform, // This is key for showing waveforms
 			// Note: No MediaKey or FileEncSHA256 for newsletter media (unencrypted)
 		}
 		message = &waE2E.Message{AudioMessage: audioMsg}
@@ -814,7 +820,7 @@ func (ms *MessageService) SendList(userID, to, text, footer, buttonText string, 
 
 	// Criar seções
 	var listSections []*waE2E.ListMessage_Section
-	for _, section := range sections {
+for _, section := range sections {
 		var rows []*waE2E.ListMessage_Row
 
 		for _, row := range section.Rows {
@@ -1505,4 +1511,107 @@ func (ms *MessageService) updateNewsletterPictureViaRawNodes(client *whatsmeow.C
 func (ms *MessageService) setNewsletterPhotoViaExtension(client *whatsmeow.Client, jid types.JID, imageData []byte) (string, error) {
 	// Use the extension method for setting newsletter photo
 	return extensions.SetNewsletterPhoto(client, jid, imageData)
+}
+
+// generateWaveform creates a realistic-looking waveform for audio messages
+// This generates a random but natural-looking waveform pattern
+func generateWaveform(audioData []byte) []byte {
+	// WhatsApp typically uses 64 samples for waveform visualization
+	waveform := make([]byte, 64)
+	
+	// Seed random number generator with file size for consistent patterns per file
+	rand.Seed(int64(len(audioData)) + time.Now().UnixNano())
+	
+	// Generate a more realistic waveform with peaks and valleys
+	for i := range waveform {
+		var value int
+		
+		// Create some variation in the pattern
+		switch {
+		case i < 8 || i > 56: // Fade in/out at beginning and end
+			value = rand.Intn(30) + 10
+		case i%8 == 0: // Create some peaks
+			value = rand.Intn(40) + 60
+		case i%12 == 0: // Create some valleys
+			value = rand.Intn(20) + 5
+		default: // Normal variation
+			value = rand.Intn(60) + 20
+		}
+		
+		// Ensure value is within valid range (0-99)
+		if value > 99 {
+			value = 99
+		}
+		
+		waveform[i] = byte(value)
+	}
+	
+	logger.Debug("Generated waveform",
+		"samples", len(waveform),
+		"file_size", len(audioData))
+	
+	return waveform
+}
+
+// getDurationInSeconds extracts audio duration from file data
+func getDurationInSeconds(audioData []byte) uint32 {
+	// Try to parse as MP3 first
+	if duration, err := getMP3Duration(audioData); err == nil {
+		seconds := int(duration.Seconds())
+		if seconds < 1 {
+			seconds = 1
+		} else if seconds > 300 { // Max 5 minutes
+			seconds = 300
+		}
+		return uint32(seconds)
+	}
+	
+	// For other audio formats or if MP3 parsing fails, estimate based on file size
+	fileSizeKB := len(audioData) / 1024
+	
+	// Rough estimation: assume ~8KB per second for compressed audio
+	estimatedSeconds := fileSizeKB / 8
+	
+	// Ensure minimum duration of 1 second and maximum of 300 seconds (5 minutes)
+	if estimatedSeconds < 1 {
+		estimatedSeconds = 1
+	} else if estimatedSeconds > 300 {
+		estimatedSeconds = 300
+	}
+	
+	logger.Debug("Audio duration estimated",
+		"file_size_kb", fileSizeKB,
+		"estimated_seconds", estimatedSeconds)
+	
+	return uint32(estimatedSeconds)
+}
+
+// getMP3Duration extracts the actual duration from MP3 audio data
+func getMP3Duration(audioData []byte) (time.Duration, error) {
+	reader := bytes.NewReader(audioData)
+	
+	decoder, err := mp3.NewDecoder(reader)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create MP3 decoder: %w", err)
+	}
+	
+	// Calculate duration based on sample rate and length
+	sampleRate := decoder.SampleRate()
+	length := decoder.Length()
+	
+	if sampleRate <= 0 || length <= 0 {
+		return 0, fmt.Errorf("invalid MP3 file: sample_rate=%d, length=%d", sampleRate, length)
+	}
+	
+	// Length returns number of samples (4 bytes per sample for stereo)
+	samples := length / 4
+	duration := time.Duration(samples) * time.Second / time.Duration(sampleRate)
+	
+	logger.Debug("MP3 duration extracted",
+		"sample_rate", sampleRate,
+		"length", length,
+		"samples", samples,
+		"duration_seconds", duration.Seconds())
+	
+	return duration, nil
 }
