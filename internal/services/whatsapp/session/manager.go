@@ -275,12 +275,34 @@ func (sm *SessionManager) GetQRChannel(ctx context.Context, userID string) (<-ch
 			return nil, fmt.Errorf("cliente já está autenticado")
 		}
 
-		// Se está conectado, desconectar primeiro
-		if client.Connected {
+		// Always clean up the existing client to avoid state conflicts
+		// This ensures we start fresh for QR code generation
+		if client.WAClient.IsConnected() {
 			client.WAClient.Disconnect()
-			client.Connected = false
-			time.Sleep(1 * time.Second) // Pequena pausa para garantir desconexão
 		}
+		client.Connected = false
+
+		// Wait a bit for cleanup to complete
+		time.Sleep(500 * time.Millisecond)
+
+		// Create a completely new client to avoid state conflicts
+		container := sm.sqlStore.GetDBContainer()
+		if container == nil {
+			return nil, fmt.Errorf("database container is nil")
+		}
+
+		deviceStore := container.NewDevice()
+		waClient := whatsmeow.NewClient(deviceStore, sm.logger)
+
+		// Registrar event handler
+		waClient.AddEventHandler(func(evt interface{}) {
+			sm.ProcessEvent(userID, evt)
+		})
+
+		// Replace the client completely
+		client.WAClient = waClient
+		client.Connected = false
+		client.LastActive = time.Now()
 	}
 
 	// Obter canal QR

@@ -370,6 +370,31 @@ func (h *SessionHandler) GetQRCode(c *gin.Context) {
 
 	userIDStr := userID.(string)
 
+	// Check if there's already an active session (authenticated and connected)
+	// Block QR generation to prevent overriding existing sessions
+	existingClient, exists := h.sessionManager.GetSession(userIDStr)
+	if exists && existingClient.Connected && existingClient.WAClient.Store.ID != nil {
+		// Active session exists - do not allow QR generation
+		c.JSON(http.StatusConflict, gin.H{
+			"error":      "Sessão ativa já existe",
+			"message":    "Já existe uma sessão autenticada e conectada. Desconecte a sessão atual antes de gerar um novo QR code.",
+			"status":     "connected",
+			"connected":  true,
+			"session_id": userIDStr,
+		})
+		return
+	}
+
+	// Clean up any non-active session state before generating new QR
+	// This ensures we don't have conflicting goroutines from previous QR attempts
+	if exists {
+		logger.Info("Limpando estado de sessão não-ativa antes de gerar novo QR", "user_id", userIDStr)
+		if err := h.sessionManager.ResetSession(c.Request.Context(), userIDStr); err != nil {
+			logger.Warn("Falha ao resetar sessão existente", "error", err, "user_id", userIDStr)
+			// Continue anyway - this might be the first QR request
+		}
+	}
+
 	// Verificar se já existe uma sessão e se está autenticada
 	client, exists := h.sessionManager.GetSession(userIDStr)
 	if exists && client.WAClient.Store.ID != nil {
@@ -416,6 +441,9 @@ func (h *SessionHandler) GetQRCode(c *gin.Context) {
 	// Função para verificar estado de conexão periodicamente
 	connectionCheckTicker := time.NewTicker(5 * time.Second)
 	defer connectionCheckTicker.Stop()
+
+	// Context to handle client disconnection
+	clientGone := c.Request.Context().Done()
 
 	// Monitorar o canal do cliente para enviar atualizações
 	for {
@@ -473,10 +501,22 @@ func (h *SessionHandler) GetQRCode(c *gin.Context) {
 				return
 			}
 
+		case <-clientGone:
+			// Client disconnected - clean up session to prevent goroutine conflicts
+			logger.Info("Cliente SSE desconectado, limpando sessão", "user_id", userIDStr)
+			if err := h.sessionManager.ResetSession(context.Background(), userIDStr); err != nil {
+				logger.Error("Falha ao limpar sessão após desconexão SSE", "error", err, "user_id", userIDStr)
+			}
+			return
+
 		case <-ctx.Done():
 			// Timeout geral
 			c.SSEvent("error", gin.H{"message": "Timeout ao aguardar QR code"})
 			c.Writer.Flush()
+			// Clean up session after timeout
+			if err := h.sessionManager.ResetSession(context.Background(), userIDStr); err != nil {
+				logger.Error("Falha ao limpar sessão após timeout", "error", err, "user_id", userIDStr)
+			}
 			return
 		}
 	}
