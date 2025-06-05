@@ -60,8 +60,10 @@ func (h *SessionHandler) CreateSession(c *gin.Context) {
 
 	// Verificar se cliente já está conectado
 	status := "created"
-	if client.Connected {
+	if client.Connected && client.WAClient.Store.ID != nil {
 		status = "connected"
+	} else if client.WAClient.Store.ID != nil {
+		status = "authenticated_disconnected"
 	}
 
 	resp := SessionResponse{
@@ -105,8 +107,15 @@ func (h *SessionHandler) GetSession(c *gin.Context) {
 
 	// Determinar status
 	status := "disconnected"
-	if client.Connected {
+	if client.Connected && client.WAClient.Store.ID != nil {
+		// Only consider connected if authenticated (has Store.ID)
 		status = "connected"
+	} else if client.WAClient.Store.ID != nil {
+		// Has authentication but not connected
+		status = "authenticated_disconnected"
+	} else {
+		// Not authenticated
+		status = "not_authenticated"
 	}
 
 	resp := SessionResponse{
@@ -163,8 +172,12 @@ func (h *SessionHandler) GetAllSessions(c *gin.Context) {
 
 	// Determinar status
 	status := "disconnected"
-	if client.Connected {
+	if client.Connected && client.WAClient.Store.ID != nil {
 		status = "connected"
+	} else if client.WAClient.Store.ID != nil {
+		status = "authenticated_disconnected"
+	} else {
+		status = "not_authenticated"
 	}
 
 	sessionResp := SessionResponse{
@@ -208,8 +221,12 @@ func (h *SessionHandler) GetAllSessionsAdmin(c *gin.Context) {
 	var sessions []SessionResponse
 	for userID, client := range allSessions {
 		status := "disconnected"
-		if client.Connected {
+		if client.Connected && client.WAClient.Store.ID != nil {
 			status = "connected"
+		} else if client.WAClient.Store.ID != nil {
+			status = "authenticated_disconnected"
+		} else {
+			status = "not_authenticated"
 		}
 
 		sessionResp := SessionResponse{
@@ -294,8 +311,12 @@ func (h *SessionHandler) GetBulkSessionStatus(c *gin.Context) {
 
 		// Determinar status
 		status := "disconnected"
-		if client.Connected {
+		if client.Connected && client.WAClient.Store.ID != nil {
 			status = "connected"
+		} else if client.WAClient.Store.ID != nil {
+			status = "authenticated_disconnected"
+		} else {
+			status = "not_authenticated"
 		}
 
 		sessionResp := SessionResponse{

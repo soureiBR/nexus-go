@@ -298,9 +298,10 @@ func (sm *SessionManager) GetQRChannel(ctx context.Context, userID string) (<-ch
 		for i := 0; i < maxRetries; i++ {
 			err := client.WAClient.Connect()
 			if err == nil {
-				client.Connected = true
+				// Don't set client.Connected = true here
+				// This will be set by the ProcessEvent when authentication succeeds
 				client.LastActive = time.Now()
-				logger.Info("Cliente conectado com sucesso", "user_id", userID)
+				logger.Info("Cliente conectado aos servidores WhatsApp", "user_id", userID)
 				break
 			}
 
