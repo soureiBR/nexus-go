@@ -104,13 +104,13 @@ type RevokeInviteLinkRequest struct {
 // SetGroupLockedRequest representa a requisição para alterar o status de bloqueio do grupo
 type SetGroupLockedRequest struct {
 	GroupJID string `json:"group_jid" binding:"required"`
-	Locked   bool   `json:"locked" binding:"required"`
+	Locked   bool   `json:"locked"`
 }
 
 // SetGroupAnnounceRequest representa a requisição para alterar o modo de anúncio do grupo
 type SetGroupAnnounceRequest struct {
 	GroupJID string `json:"group_jid" binding:"required"`
-	Announce bool   `json:"announce" binding:"required"`
+	Announce bool   `json:"announce"`
 }
 
 // SetGroupJoinApprovalModeRequest representa a requisição para alterar o modo de aprovação de entrada
