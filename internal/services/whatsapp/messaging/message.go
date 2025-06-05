@@ -113,8 +113,8 @@ func (ms *MessageService) validateAndProcessPhoneNumber(userID, phoneNumber stri
 	// Handle Brazilian numbers with the 9-digit rule
 	processed := ms.processBrazilianNumber(cleaned)
 
-	// Check if the number exists on WhatsApp
-	exists, err := ms.checkNumberExistsOnWhatsApp(userID, processed)
+	// Check if the number exists on WhatsApp and get the correct JID
+	jid, exists, err := ms.checkNumberExistsOnWhatsAppAndGetJID(userID, processed)
 	if err != nil {
 		logger.Debug("Erro ao verificar número no WhatsApp", "number", processed, "error", err)
 		// Continue even if verification fails, but log the error
@@ -159,19 +159,22 @@ func (ms *MessageService) validateAndProcessPhoneNumber(userID, phoneNumber stri
 
 			// Test each alternative
 			for _, alt := range alternatives {
-				altExists, altErr := ms.checkNumberExistsOnWhatsApp(userID, alt)
+				altJID, altExists, altErr := ms.checkNumberExistsOnWhatsAppAndGetJID(userID, alt)
 				if altErr == nil && altExists {
-					processed = alt
-					break
+					return altJID, nil
 				}
 			}
 		}
 	}
 
-	// Format as WhatsApp JID
-	jid := processed + "@s.whatsapp.net"
+	if exists && jid != "" {
+		return jid, nil
+	}
 
-	return jid, nil
+	// If no valid JID found, fallback to manual construction
+	fallbackJID := processed + "@s.whatsapp.net"
+	logger.Debug("Usando JID de fallback", "number", processed, "jid", fallbackJID)
+	return fallbackJID, nil
 }
 
 // cleanPhoneNumber removes formatting characters from phone number
@@ -241,32 +244,45 @@ func (ms *MessageService) addNinthDigitToBrazilian(number string) string {
 	return number
 }
 
-// checkNumberExistsOnWhatsApp verifies if a number exists on WhatsApp
-func (ms *MessageService) checkNumberExistsOnWhatsApp(userID, number string) (bool, error) {
+// checkNumberExistsOnWhatsAppAndGetJID verifies if a number exists on WhatsApp and returns the correct JID
+func (ms *MessageService) checkNumberExistsOnWhatsAppAndGetJID(userID, number string) (string, bool, error) {
 	client, exists := ms.sessionManager.GetSession(userID)
 	if !exists {
-		return false, fmt.Errorf("sessão não encontrada: %s", userID)
+		return "", false, fmt.Errorf("sessão não encontrada: %s", userID)
 	}
 
 	// Verificar se o cliente está conectado
 	if !client.Connected {
-		return false, fmt.Errorf("cliente não está conectado")
+		return "", false, fmt.Errorf("cliente não está conectado")
 	}
 
 	// Format with + for WhatsApp API
-	numberWithPlus := "+" + number + "@s.whatsapp.net"
+	numberWithPlus := "+" + number
 
 	// Check status
 	responses, err := client.WAClient.IsOnWhatsApp([]string{numberWithPlus})
 	if err != nil {
-		return false, fmt.Errorf("falha ao verificar número: %w", err)
+		return "", false, fmt.Errorf("falha ao verificar número: %w", err)
 	}
 
 	if len(responses) == 0 {
-		return false, nil
+		return "", false, nil
 	}
 
-	return responses[0].IsIn, nil
+	response := responses[0]
+	logger.Debug("IsOnWhatsApp response", "query", response.Query, "jid", response.JID.String(), "is_in", response.IsIn)
+
+	if response.IsIn {
+		return response.JID.String(), true, nil
+	}
+
+	return "", false, nil
+}
+
+// checkNumberExistsOnWhatsApp verifies if a number exists on WhatsApp (legacy function for compatibility)
+func (ms *MessageService) checkNumberExistsOnWhatsApp(userID, number string) (bool, error) {
+	_, exists, err := ms.checkNumberExistsOnWhatsAppAndGetJID(userID, number)
+	return exists, err
 }
 
 // CheckNumberExistsOnWhatsApp verifies if a number exists on WhatsApp (public method)
