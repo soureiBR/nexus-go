@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -424,7 +425,17 @@ func (h *SessionHandler) GetQRCode(c *gin.Context) {
 	qrChan, err := h.sessionManager.GetQRChannel(ctx, userIDStr)
 	if err != nil {
 		logger.Error("Falha ao obter canal QR", "error", err, "user_id", userIDStr)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao gerar QR code", "details": err.Error()})
+		
+		// Check if it's a concurrent request error
+		if strings.Contains(err.Error(), "QR request already in progress") {
+			c.JSON(http.StatusConflict, gin.H{
+				"error":   "QR request em andamento",
+				"message": "Já existe uma solicitação de QR code em andamento para esta sessão. Aguarde a conclusão da solicitação atual.",
+				"code":    "QR_REQUEST_IN_PROGRESS",
+			})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao gerar QR code", "details": err.Error()})
+		}
 		return
 	}
 

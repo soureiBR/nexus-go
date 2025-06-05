@@ -27,6 +27,9 @@ type SessionManager struct {
 	logger         waLog.Logger
 	cleanupTicker  *time.Ticker
 	cleanupDone    chan struct{}
+	// Add tracking for pending QR requests
+	pendingQRRequests map[string]bool
+	qrMutex          sync.Mutex
 }
 
 // NewSessionManager creates a new session manager
@@ -35,11 +38,12 @@ func NewSessionManager(sqlStore *storage.SQLStore) *SessionManager {
 	waLogger := waLog.Stdout("whatsapp", "INFO", true)
 
 	sm := &SessionManager{
-		clients:       make(map[string]*Client),
-		sqlStore:      sqlStore,
-		eventHandlers: make(map[string][]EventHandler),
-		logger:        waLogger,
-		cleanupDone:   make(chan struct{}),
+		clients:           make(map[string]*Client),
+		sqlStore:          sqlStore,
+		eventHandlers:     make(map[string][]EventHandler),
+		logger:            waLogger,
+		cleanupDone:       make(chan struct{}),
+		pendingQRRequests: make(map[string]bool),
 	}
 
 	return sm
@@ -239,6 +243,23 @@ func (sm *SessionManager) Connect(ctx context.Context, userID string) error {
 // GetQRChannel retorna um canal de eventos QR code para autenticação
 // GetQRChannel retorna um canal de eventos QR code para autenticação
 func (sm *SessionManager) GetQRChannel(ctx context.Context, userID string) (<-chan whatsmeow.QRChannelItem, error) {
+	// Check for pending QR request first
+	sm.qrMutex.Lock()
+	if sm.pendingQRRequests[userID] {
+		sm.qrMutex.Unlock()
+		return nil, fmt.Errorf("QR request already in progress for user %s. Please wait for the current request to complete", userID)
+	}
+	// Mark this user as having a pending QR request
+	sm.pendingQRRequests[userID] = true
+	sm.qrMutex.Unlock()
+
+	// Cleanup function to remove pending request flag
+	cleanup := func() {
+		sm.qrMutex.Lock()
+		delete(sm.pendingQRRequests, userID)
+		sm.qrMutex.Unlock()
+	}
+
 	sm.clientsMutex.Lock()
 	defer sm.clientsMutex.Unlock()
 
@@ -248,6 +269,7 @@ func (sm *SessionManager) GetQRChannel(ctx context.Context, userID string) (<-ch
 		// Criar nova sessão
 		container := sm.sqlStore.GetDBContainer()
 		if container == nil {
+			cleanup()
 			return nil, fmt.Errorf("database container is nil")
 		}
 
@@ -272,6 +294,7 @@ func (sm *SessionManager) GetQRChannel(ctx context.Context, userID string) (<-ch
 	} else {
 		// Se o cliente existe, verificar se não está autenticado
 		if client.WAClient.Store.ID != nil {
+			cleanup()
 			return nil, fmt.Errorf("cliente já está autenticado")
 		}
 
@@ -288,6 +311,7 @@ func (sm *SessionManager) GetQRChannel(ctx context.Context, userID string) (<-ch
 		// Create a completely new client to avoid state conflicts
 		container := sm.sqlStore.GetDBContainer()
 		if container == nil {
+			cleanup()
 			return nil, fmt.Errorf("database container is nil")
 		}
 
@@ -308,11 +332,14 @@ func (sm *SessionManager) GetQRChannel(ctx context.Context, userID string) (<-ch
 	// Obter canal QR
 	qrChan, err := client.WAClient.GetQRChannel(ctx)
 	if err != nil {
+		cleanup()
 		return nil, fmt.Errorf("falha ao obter canal QR: %w", err)
 	}
 
 	// Iniciar conexão em goroutine
 	go func() {
+		defer cleanup() // Always cleanup when goroutine exits
+		
 		logger.Info("Iniciando conexão para QR code", "user_id", userID)
 
 		// Tentar conectar com retry em caso de falhas
@@ -386,6 +413,11 @@ func (sm *SessionManager) ResetSession(ctx context.Context, userID string) error
 	sm.clientsMutex.Lock()
 	defer sm.clientsMutex.Unlock()
 
+	// Clear any pending QR request
+	sm.qrMutex.Lock()
+	delete(sm.pendingQRRequests, userID)
+	sm.qrMutex.Unlock()
+
 	client, exists := sm.clients[userID]
 	if !exists {
 		return fmt.Errorf("sessão não encontrada: %s", userID)
@@ -426,6 +458,11 @@ func (sm *SessionManager) ResetSession(ctx context.Context, userID string) error
 
 // Logout logs out and removes a session
 func (sm *SessionManager) Logout(ctx context.Context, userID string) error {
+	// Clear any pending QR request
+	sm.qrMutex.Lock()
+	delete(sm.pendingQRRequests, userID)
+	sm.qrMutex.Unlock()
+
 	client, exists := sm.GetSession(userID)
 	if !exists {
 		return fmt.Errorf("session not found: %s", userID)
@@ -503,6 +540,11 @@ func (sm *SessionManager) handleDeviceLogout(userID string) error {
 func (sm *SessionManager) DeleteSession(ctx context.Context, userID string) error {
 	sm.clientsMutex.Lock()
 	defer sm.clientsMutex.Unlock()
+
+	// Clear any pending QR request
+	sm.qrMutex.Lock()
+	delete(sm.pendingQRRequests, userID)
+	sm.qrMutex.Unlock()
 
 	client, exists := sm.clients[userID]
 	if !exists {
@@ -688,4 +730,18 @@ func (cma *CommunityManagerAdapter) GetSession(userID string) (CommunityClient, 
 
 	// session.Client already implements CommunityClient interface
 	return client, true
+}
+
+// IsQRRequestPending checks if there's a pending QR request for a user
+func (sm *SessionManager) IsQRRequestPending(userID string) bool {
+	sm.qrMutex.Lock()
+	defer sm.qrMutex.Unlock()
+	return sm.pendingQRRequests[userID]
+}
+
+// ClearPendingQRRequest manually clears a pending QR request (useful for cleanup)
+func (sm *SessionManager) ClearPendingQRRequest(userID string) {
+	sm.qrMutex.Lock()
+	delete(sm.pendingQRRequests, userID)
+	sm.qrMutex.Unlock()
 }
