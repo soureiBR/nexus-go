@@ -58,11 +58,14 @@ func (sm *SessionManager) ProcessEvent(userID string, evt interface{}) {
 				logger.Info("Mapeamento salvo", "user_id", userID, "device_jid", deviceJID)
 			}
 
-			// Atualizar estado conectado
+			// Only set Connected = true when authenticated (has Store.ID)
+			// This means QR code was scanned and authentication succeeded
 			sm.clientsMutex.Lock()
 			client.Connected = true
 			sm.clientsMutex.Unlock()
 		}
+		// If client.WAClient.Store.ID is nil, this is just a connection to WhatsApp servers
+		// without authentication - don't set Connected = true
 
 	case *events.Disconnected:
 		eventType = "connection.update"
