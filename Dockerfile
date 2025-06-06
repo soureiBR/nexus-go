@@ -2,54 +2,59 @@
 # Stage 1: Build
 FROM golang:1.24.3-alpine AS builder
 
-# Instalar dependências de build
-RUN apk add --no-cache gcc musl-dev
+# Instalar dependências de build necessárias
+RUN apk add --no-cache gcc musl-dev sqlite-dev
 
 # Configurar diretório de trabalho
 WORKDIR /app
 
-# Copiar módulos Go
+# Copiar módulos Go primeiro (para aproveitar cache do Docker)
 COPY go.mod go.sum ./
 
 # Baixar dependências
-RUN go mod download
+RUN go mod download && go mod verify
 
 # Copiar código-fonte
 COPY . .
 
-# Compilar a aplicação
-RUN CGO_ENABLED=1 GOOS=linux go build -a -ldflags="-w -s" -o whatsapp-api ./cmd/api
+# Compilar a aplicação com flags otimizadas
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build \
+    -a -installsuffix cgo \
+    -ldflags="-w -s -extldflags '-static'" \
+    -o whatsapp-api ./cmd/api
+
+# Verificar se o binário foi criado
+RUN ls -la /app/whatsapp-api
 
 # Stage 2: Runtime
-FROM alpine:3.18
+FROM alpine:3.19
 
-# Adicionar suporte a fuso horário e CA certs
-RUN apk add --no-cache tzdata ca-certificates && \
-    update-ca-certificates
+# Instalar dependências de runtime
+RUN apk add --no-cache \
+    tzdata \
+    ca-certificates \
+    sqlite \
+    wget \
+    && update-ca-certificates
 
 # Criar usuário não-root
-RUN adduser -D -u 1000 appuser
+RUN addgroup -g 1000 appuser && \
+    adduser -D -u 1000 -G appuser appuser
 
-# Criar diretórios necessários
-RUN mkdir -p /app/sessions /app/data && \
+# Criar diretórios necessários com permissões corretas
+RUN mkdir -p /app/sessions /app/data /app/logs && \
     chown -R appuser:appuser /app
 
 # Configurar diretório de trabalho
 WORKDIR /app
 
-# Copiar binário compilado
-COPY --from=builder --chown=appuser:appuser /app/whatsapp-api .
+# Copiar binário compilado com permissões corretas
+COPY --from=builder --chown=appuser:appuser /app/whatsapp-api ./whatsapp-api
 
-# Criar arquivo .env padrão no contêiner
-RUN echo "PORT=8080\n\
-    API_KEY=your-secure-api-key\n\
-    LOG_LEVEL=info\n\
-    WEBHOOK_URL=\n\
-    DB_PATH=/app/data/whatsapp.db\n\
-    RABBITMQ_URL=amqp://guest:guest@localhost:5672/" > /app/.env && \
-    chown appuser:appuser /app/.env
+# Tornar o binário executável
+RUN chmod +x /app/whatsapp-api
 
-# Definir usuário não-root
+# Definir usuário não-root antes de criar arquivos
 USER appuser
 
 # Expor porta da aplicação
@@ -58,11 +63,12 @@ EXPOSE 8080
 # Definir variáveis de ambiente padrão
 ENV GIN_MODE=release \
     PORT=8080 \
-    LOG_LEVEL=info
+    LOG_LEVEL=info \
+    DB_PATH=/app/data/whatsapp.db
 
 # Definir ponto de entrada
-ENTRYPOINT ["/app/whatsapp-api"]
+ENTRYPOINT ["./whatsapp-api"]
 
 # Definir health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget -qO- http://localhost:8080/health || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
