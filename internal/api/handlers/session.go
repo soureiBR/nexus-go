@@ -14,6 +14,7 @@ import (
 	"github.com/mdp/qrterminal/v3"
 	"github.com/skip2/go-qrcode"
 
+	"yourproject/internal/config"
 	"yourproject/internal/services/whatsapp"
 	"yourproject/pkg/logger"
 )
@@ -21,6 +22,7 @@ import (
 // SessionHandler gerencia endpoints para operações com sessões
 type SessionHandler struct {
 	sessionManager *whatsapp.SessionManager
+	config         config.Config
 }
 
 // SessionResponse representa a resposta de uma operação com sessão
@@ -35,9 +37,10 @@ type SessionResponse struct {
 }
 
 // NewSessionHandler cria um novo handler para sessões
-func NewSessionHandler(sm *whatsapp.SessionManager) *SessionHandler {
+func NewSessionHandler(sm *whatsapp.SessionManager, cfg config.Config) *SessionHandler {
 	return &SessionHandler{
 		sessionManager: sm,
+		config:         cfg,
 	}
 }
 
@@ -470,10 +473,12 @@ func (h *SessionHandler) GetQRCode(c *gin.Context) {
 			logger.Info("Evento QR recebido", "event", evt.Event, "user_id", userIDStr)
 
 			if evt.Event == "code" {
-				// Imprimir QR no terminal para debug
-				fmt.Println("\n===== QR CODE para sessão", userIDStr, "=====")
-				qrterminal.GenerateHalfBlock(evt.Code, qrterminal.L, os.Stdout)
-				fmt.Println("\nEscaneie o código acima com o seu WhatsApp")
+				// Imprimir QR no terminal apenas se a variável de ambiente PRINT_QR for true
+				if h.config.PrintQR {
+					fmt.Println("\n===== QR CODE para sessão", userIDStr, "=====")
+					qrterminal.GenerateHalfBlock(evt.Code, qrterminal.L, os.Stdout)
+					fmt.Println("\nEscaneie o código acima com o seu WhatsApp")
+				}
 
 				// Gerar QR para cliente
 				qrImg, err := qrcode.Encode(evt.Code, qrcode.Medium, 256)

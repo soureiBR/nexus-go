@@ -4,6 +4,7 @@ package config
 import (
 	"log"
 	"os"
+	"strconv"
 
 	"github.com/joho/godotenv"
 )
@@ -17,6 +18,7 @@ type Config struct {
 	WebhookURL  string
 	DBPath      string
 	RabbitMQURL string
+	PrintQR     bool
 }
 
 // LoadEnv loads environment variables from .env file
@@ -46,6 +48,7 @@ func LoadConfig() Config {
 		WebhookURL:  os.Getenv("WEBHOOK_URL"),
 		DBPath:      getEnvOrDefault("DB_PATH", "./data/whatsapp.db"),
 		RabbitMQURL: getEnvOrDefault("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"),
+		PrintQR:     getBoolEnvOrDefault("PRINT_QR", false),
 	}
 }
 
@@ -56,4 +59,20 @@ func getEnvOrDefault(key, defaultValue string) string {
 		return defaultValue
 	}
 	return value
+}
+
+// getBoolEnvOrDefault obtém uma variável de ambiente boolean ou retorna valor padrão
+func getBoolEnvOrDefault(key string, defaultValue bool) bool {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		log.Printf("Warning: Invalid boolean value for %s: %s, using default: %v", key, value, defaultValue)
+		return defaultValue
+	}
+	
+	return parsed
 }

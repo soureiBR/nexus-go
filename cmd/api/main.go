@@ -172,7 +172,7 @@ func main() {
 	})
 
 	// Configure HTTP handlers
-	sessionHandler := handlers.NewSessionHandler(sessionManager)
+	sessionHandler := handlers.NewSessionHandler(sessionManager, cfg)
 	messageHandler := handlers.NewMessageHandler(sessionManager)
 	groupHandler := handlers.NewGroupHandler(sessionManager)
 	communityHandler := handlers.NewCommunityHandler(sessionManager)
