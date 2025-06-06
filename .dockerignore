@@ -1,0 +1,39 @@
+# Binários
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+whatsapp-api
+
+# Arquivos de teste
+*_test.go
+
+# Arquivos de desenvolvimento
+.env*
+.vscode/
+.idea/
+*.log
+
+# Dados locais
+data/
+sessions/
+logs/
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile*
+docker-compose*
+*.dockerfile
+
+# Documentação
+README.md
+*.md
+
+# Outros
+node_modules/
+vendor/
+tmp/
