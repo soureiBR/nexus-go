@@ -7,6 +7,8 @@ pkgs.mkShell {
     gnumake
     sqlite
     pkg-config
+    docker
+    docker-compose
   ];
   
   shellHook = ''

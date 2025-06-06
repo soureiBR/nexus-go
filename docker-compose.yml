@@ -1,4 +1,3 @@
-# docker-compose.yml
 version: '3.8'
 
 services:
@@ -11,31 +10,61 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
-    volumes:
-      - whatsapp-sessions:/app/sessions
-      - whatsapp-data:/app/data
     environment:
       - PORT=8080
-      - API_KEY=${API_KEY:-your-secure-api-key}
-      - LOG_LEVEL=${LOG_LEVEL:-info}
-      - WEBHOOK_URL=${WEBHOOK_URL:-}
-      - DB_PATH=/app/data/whatsapp.db
-      - RABBITMQ_URL=${RABBITMQ_URL:-amqp://guest:guest@localhost:5672/}
+      - LOG_LEVEL=info
+      - API_KEY=
+      - ADMIN_API_KEY=hello
+      - DB_PATH=/app/data/whatsapp.db # Corrigido para usar /app/data
+      - RABBITMQ_ENABLED=true
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      - WEBHOOK_URL=
+      - PRINT_QR=true
+      - GIN_MODE=release
+    volumes:
+      - whatsapp_data:/app/data
+      - whatsapp_sessions:/app/sessions
+    networks:
+      - whatsapp-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     healthcheck:
-      test: [ "CMD", "wget", "-qO-", "http://localhost:8080/health" ]
+      test: [ "CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/health" ]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 5s
+      start_period: 10s
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: rabbitmq-whatsapp
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
     networks:
       - whatsapp-network
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "rabbitmq-diagnostics", "ping" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
 networks:
   whatsapp-network:
     driver: bridge
 
 volumes:
-  whatsapp-sessions:
+  whatsapp_data:
     driver: local
-  whatsapp-data:
+  whatsapp_sessions:
+    driver: local
+  rabbitmq_data:
     driver: local

@@ -54,7 +54,10 @@ COPY --from=builder --chown=appuser:appuser /app/whatsapp-api ./whatsapp-api
 # Tornar o binário executável
 RUN chmod +x /app/whatsapp-api
 
-# Definir usuário não-root antes de criar arquivos
+# Criar arquivo .env padrão (opcional, pois usaremos env vars)
+RUN touch /app/.env && chown appuser:appuser /app/.env
+
+# Definir usuário não-root
 USER appuser
 
 # Expor porta da aplicação
