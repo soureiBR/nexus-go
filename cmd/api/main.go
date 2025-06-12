@@ -57,6 +57,8 @@ func main() {
 		rabbitConfig := rabbitmq.Config{
 			URL:          cfg.RabbitMQURL,
 			ExchangeName: "whatsapp.events",
+			TLSConfig:    nil, // Set to your TLS config if needed
+			InsecureSkipVerify: true, // Set to true if you want to disable SSL verification
 		}
 
 		eventPublisher, err = rabbitmq.NewEventPublisher(rabbitConfig)

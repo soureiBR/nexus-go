@@ -3,6 +3,7 @@ package rabbitmq
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -19,12 +20,15 @@ type EventPublisher struct {
 	exchangeName string
 	isConnected  bool
 	url          string
+	config       Config
 }
 
 // Config represents RabbitMQ configuration
 type Config struct {
 	URL          string
 	ExchangeName string
+	TLSConfig    *tls.Config
+    InsecureSkipVerify bool
 }
 
 // NewEventPublisher creates a new RabbitMQ event publisher
@@ -32,6 +36,7 @@ func NewEventPublisher(config Config) (*EventPublisher, error) {
 	publisher := &EventPublisher{
 		url:          config.URL,
 		exchangeName: config.ExchangeName,
+		config:       config,
 	}
 
 	err := publisher.connect()
@@ -47,7 +52,28 @@ func NewEventPublisher(config Config) (*EventPublisher, error) {
 
 // connect establishes connection to RabbitMQ
 func (p *EventPublisher) connect() error {
-	conn, err := amqp.Dial(p.url)
+	var conn *amqp.Connection
+	var err error
+	
+	// Parse URL to check if it's using TLS
+	if len(p.url) > 6 && p.url[:6] == "amqps:" {
+		// Use TLS connection with custom config
+		tlsConfig := p.config.TLSConfig
+		if tlsConfig == nil {
+			tlsConfig = &tls.Config{}
+		}
+		
+		// Apply InsecureSkipVerify setting
+		if p.config.InsecureSkipVerify {
+			tlsConfig.InsecureSkipVerify = true
+		}
+		
+		conn, err = amqp.DialTLS(p.url, tlsConfig)
+	} else {
+		// Use regular connection for amqp:// URLs
+		conn, err = amqp.Dial(p.url)
+	}
+	
 	if err != nil {
 		return fmt.Errorf("failed to connect to RabbitMQ: %w", err)
 	}

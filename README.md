@@ -41,7 +41,7 @@ cp .env.example .env
 
 4. Execute a aplicação
 ```bash
-go run cmd/api/main.go
+CGO_ENABLED=1 go run cmd/api/main.go
 ```
 
 ### Usando Docker
