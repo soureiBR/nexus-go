@@ -55,7 +55,7 @@ func (cm *ConsumerManager) RegisterSendMessageConsumer(config ConsumerManagerCon
 			ExchangeName:  config.ExchangeName,
 			QueueName:     "whatsapp.events.send-message",
 			RoutingKeys:   []string{"whatsapp.events.send-message"},
-			PrefetchCount: 1,
+			PrefetchCount: 6,
 		},
 		SessionManager: config.SessionManager,
 		Publisher:      config.Publisher,
