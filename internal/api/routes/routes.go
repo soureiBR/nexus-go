@@ -18,6 +18,7 @@ func SetupRoutes(
 	groupHandler *handlers.GroupHandler,
 	newsletterHandler *handlers.NewsletterHandler,
 	communityHandler *handlers.CommunityHandler,
+	authHandler *handlers.AuthHandler,
 	authMiddleware *middlewares.AuthMiddleware,
 ) {
 	// Middleware global
@@ -53,6 +54,13 @@ func SetupRoutes(
 	sessionAdmin.Use(authMiddleware.ValidateAdminKey())
 	{
 		sessionAdmin.GET("/all", sessionHandler.GetAllSessionsAdmin)
+	}
+
+	// Rotas de autenticação admin (requerem chave admin)
+	auth := v1.Group("/auth")
+	auth.Use(authMiddleware.ValidateAdminKey())
+	{
+		auth.POST("/session/encrypt", authHandler.EncryptSession)
 	}
 
 	// Rotas de mensagem

@@ -11,14 +11,15 @@ import (
 
 // Config armazena configurações da aplicação
 type Config struct {
-	Port        string
-	APIKey      string
-	AdminAPIKey string
-	LogLevel    string
-	WebhookURL  string
-	DBPath      string
-	RabbitMQURL string
-	PrintQR     bool
+	Port          string
+	APIKey        string
+	AdminAPIKey   string
+	EncryptionKey string
+	LogLevel      string
+	WebhookURL    string
+	DBPath        string
+	RabbitMQURL   string
+	PrintQR       bool
 }
 
 // LoadEnv loads environment variables from .env file
@@ -41,14 +42,15 @@ func LoadConfig() Config {
 	}
 
 	return Config{
-		Port:        port,
-		APIKey:      os.Getenv("API_KEY"),
-		AdminAPIKey: os.Getenv("ADMIN_API_KEY"),
-		LogLevel:    getEnvOrDefault("LOG_LEVEL", "debug"),
-		WebhookURL:  os.Getenv("WEBHOOK_URL"),
-		DBPath:      getEnvOrDefault("DB_PATH", "./data/whatsapp.db"),
-		RabbitMQURL: getEnvOrDefault("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"),
-		PrintQR:     getBoolEnvOrDefault("PRINT_QR", false),
+		Port:          port,
+		APIKey:        os.Getenv("API_KEY"),
+		AdminAPIKey:   os.Getenv("ADMIN_API_KEY"),
+		EncryptionKey: getEnvOrDefault("ENCRYPTION_KEY", "default-32-byte-key-for-aes-256!"),
+		LogLevel:      getEnvOrDefault("LOG_LEVEL", "debug"),
+		WebhookURL:    os.Getenv("WEBHOOK_URL"),
+		DBPath:        getEnvOrDefault("DB_PATH", "./data/whatsapp.db"),
+		RabbitMQURL:   getEnvOrDefault("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"),
+		PrintQR:       getBoolEnvOrDefault("PRINT_QR", false),
 	}
 }
 

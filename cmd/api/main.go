@@ -180,13 +180,14 @@ func main() {
 	communityHandler := handlers.NewCommunityHandler(sessionManager)
 	newsletterHandler := handlers.NewNewsletterHandler(sessionManager)
 	webhookHandler := handlers.NewWebhookHandler(webhookService)
+	authHandler := handlers.NewAuthHandler(cfg.EncryptionKey)
 
 	// Configure authentication middleware
-	authMiddleware := middlewares.NewAuthMiddleware(cfg.APIKey, cfg.AdminAPIKey)
+	authMiddleware := middlewares.NewAuthMiddleware(cfg.APIKey, cfg.AdminAPIKey, authHandler)
 
 	// Configure HTTP server
 	r := gin.Default()
-	routes.SetupRoutes(r, sessionHandler, messageHandler, webhookHandler, groupHandler, newsletterHandler, communityHandler, authMiddleware)
+	routes.SetupRoutes(r, sessionHandler, messageHandler, webhookHandler, groupHandler, newsletterHandler, communityHandler, authHandler, authMiddleware)
 
 	// Start server with graceful shutdown
 	srv := &http.Server{
